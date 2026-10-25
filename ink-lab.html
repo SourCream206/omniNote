@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'" />
+    <title>Whiteboard+ — Ink Lab</title>
+    <link rel="stylesheet" href="./src/spike.css" />
+    <script src="./dist/spike.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-mark">W<span>+</span></div>
+        <div class="brand-copy"><strong>Whiteboard+</strong><span>Ink Lab · milestone M0</span></div>
+        <div class="topbar-right"><span class="status-dot"></span> Local prototype <span class="topbar-divider"></span> <kbd>Esc</kbd> end stroke</div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="sidebar-heading"><span>INPUT TOOLS</span><span class="subtle">01 / 03</span></div>
+          <div class="tool-list" role="group" aria-label="Ink tools">
+            <button class="tool active" data-tool="pen" type="button"><span class="tool-icon">✎</span><span><strong>Pen</strong><small>Pressure-sensitive ink</small></span><kbd>P</kbd></button>
+            <button class="tool" data-tool="highlighter" type="button"><span class="tool-icon">▰</span><span><strong>Highlighter</strong><small>Translucent marker</small></span><kbd>H</kbd></button>
+            <button class="tool" data-tool="eraser" type="button"><span class="tool-icon">◇</span><span><strong>Eraser</strong><small>Remove whole strokes</small></span><kbd>E</kbd></button>
+            <button class="tool" data-tool="hand" type="button"><span class="tool-icon">✥</span><span><strong>Hand</strong><small>Pan the canvas</small></span><kbd>Space</kbd></button>
+          </div>
+
+          <div class="sidebar-heading second"><span>BRUSH</span><span class="subtle">02 / 03</span></div>
+          <label class="field-label" for="width">Thickness <output id="width-value">4 px</output></label>
+          <input id="width" type="range" min="1" max="24" value="4" />
+          <span class="field-label color-label">Color</span>
+          <div class="color-options" role="group" aria-label="Ink color">
+            <button class="color active" data-color="#202b49" aria-label="Navy" title="Navy"></button>
+            <button class="color" data-color="#315ebd" aria-label="Blue" title="Blue"></button>
+            <button class="color" data-color="#d45666" aria-label="Coral" title="Coral"></button>
+            <button class="color" data-color="#508976" aria-label="Green" title="Green"></button>
+            <button class="color" data-color="#d19a3d" aria-label="Gold" title="Gold"></button>
+          </div>
+
+          <div class="sidebar-heading second"><span>INPUT FILTERS</span><span class="subtle">03 / 03</span></div>
+          <label class="toggle-row"><span><strong>Ignore touch while pen is near</strong><small>Basic palm rejection</small></span><input id="palm" type="checkbox" checked /><span class="switch"></span></label>
+          <label class="toggle-row"><span><strong>Pen only</strong><small>Ignore mouse and finger ink</small></span><input id="pen-only" type="checkbox" /><span class="switch"></span></label>
+          <label class="field-label select-label" for="event-source">Event stream</label>
+          <select id="event-source"><option value="move">pointermove + coalesced</option><option value="raw">pointerrawupdate</option></select>
+          <p id="raw-note" class="helper-text"></p>
+          <button id="clear" class="clear-button" type="button">Clear canvas</button>
+        </aside>
+
+        <main class="main-area">
+          <div class="canvas-bar"><div><span class="eyebrow">DEVICE TEST</span><h1>Ink feels right when it keeps up with you.</h1><p>Draw slowly, then make fast loops. Try light and heavy pressure, tilt, the eraser button, and a resting palm.</p></div><div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out" type="button">−</button><span id="zoom-value">100%</span><button id="zoom-in" aria-label="Zoom in" type="button">+</button><button id="zoom-reset" type="button">Reset view</button></div></div>
+          <div id="surface" class="surface" aria-label="Ink test canvas"><canvas id="ink"></canvas><div class="canvas-hint"><span class="hint-icon">✎</span><strong>Start drawing anywhere</strong><small>Wheel to zoom · hand or Space to pan</small></div><div class="coordinate-label">INFINITE WORKSPACE · M0 INPUT SPIKE</div></div>
+          <div class="bottom-bar"><span><span class="live-dot"></span><span id="pointer-state">Waiting for pointer input</span></span><span id="stroke-count">0 strokes</span><span id="point-count">0 points</span><span id="frame-source">—</span></div>
+        </main>
+
+        <aside class="metrics-panel"><div class="metrics-header"><span class="eyebrow">LIVE METRICS</span><span class="pulse"></span></div><h2>Stylus telemetry</h2><p>Values update while you draw. The frame delay is a software estimate, not end-to-end display latency.</p><div class="metric primary"><span>Event → animation frame</span><strong id="latency">—<em> ms</em></strong><small>Median of recent samples; lower is better</small></div><div class="metric"><span>Frame interval (p95)</span><strong id="frame-time">—<em> ms</em></strong><small>16.7 ms ≈ 60 fps target</small></div><div class="metric-grid"><div class="metric compact"><span>Input rate</span><strong id="input-rate">—<em> /s</em></strong></div><div class="metric compact"><span>Coalesced</span><strong id="coalesced">0<em> samples</em></strong></div></div><div class="metric-grid"><div class="metric compact"><span>Pressure</span><strong id="pressure">—</strong></div><div class="metric compact"><span>Tilt X / Y</span><strong id="tilt">—</strong></div></div><div class="info-card"><span>HOW TO READ THIS</span><p>Look for smooth curves, width changes with pressure, and no marks from your palm. Report the device model and anything that feels delayed or breaks.</p></div></aside>
+      </div>
+    </div>
+  </body>
+</html>

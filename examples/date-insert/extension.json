@@ -1,0 +1,19 @@
+{
+  "id": "whiteboard.date-insert",
+  "name": "Insert today's date",
+  "version": "1.0.0",
+  "apiVersion": "1.0.0",
+  "main": "extension.js",
+  "activationEvents": ["onCommand:whiteboard.date-insert.insertDate"],
+  "permissions": ["canvas.write"],
+  "contributes": {
+    "commands": [{ "id": "whiteboard.date-insert.insertDate", "title": "Insert today's date" }],
+    "toolbar": [{ "command": "whiteboard.date-insert.insertDate", "label": "Insert date" }],
+    "sidebar": [],
+    "canvasObjectTypes": [],
+    "documentViewers": [],
+    "importers": [],
+    "exporters": [],
+    "settings": []
+  }
+}

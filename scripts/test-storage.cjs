@@ -1,0 +1,30 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { WorkspaceStore } = require('../electron/storage.cjs');
+
+const directory = path.resolve(__dirname, '..', 'workspace', 'storage-test');
+fs.mkdirSync(directory, { recursive: true });
+const store = new WorkspaceStore(directory);
+const notebook = store.load().nodes.find((node) => node.kind === 'notebook');
+assert.ok(notebook);
+const folder = store.createNode(notebook.id, 'folder', 'Tests');
+const nested = store.createNode(folder, 'folder', 'Nested');
+const section = store.createNode(nested, 'section', 'Section');
+const page = store.createNode(section, 'page', 'Page');
+const object = { id: crypto.randomUUID(), page_id: page, type: 'text', x: 123, y: -42, width: 300, height: 100, z_index: 1, group_id: null, payload_version: 1, payload: { doc: { type: 'doc', content: [] } } };
+store.savePage(page, [object], { x: -123, y: 75, zoom: 1.75 });
+const original = Buffer.from('test asset bytes');
+const asset = store.importAsset('fixture.txt', 'text/plain', original);
+store.close();
+
+const reopened = new WorkspaceStore(directory);
+const snapshot = reopened.load();
+assert.equal(snapshot.schemaVersion, 1);
+assert.equal(snapshot.nodes.find((node) => node.id === page).parent_id, section);
+assert.equal(snapshot.objects.find((item) => item.id === object.id).payload.doc.type, 'doc');
+assert.equal(snapshot.pages.find((item) => item.id === page).camera_zoom, 1.75);
+assert.deepEqual(reopened.readAsset(asset.id), original);
+assert.throws(() => reopened.moveNode(folder, nested), /itself/);
+reopened.close();
+console.log('Storage round-trip passed');
