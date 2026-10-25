@@ -1,0 +1,8 @@
+{
+  "name": "whiteboard-plus-ink-lab",
+  "private": true,
+  "version": "0.0.0",
+  "main": "electron/main.cjs",
+  "scripts": { "build": "tsc -p tsconfig.json", "start": "npm run build && electron .", "typecheck": "tsc -p tsconfig.json --noEmit" },
+  "devDependencies": { "electron": "45.0.0", "typescript": "5.9.3" }
+}
