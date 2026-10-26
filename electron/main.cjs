@@ -26,6 +26,10 @@ function registerIpc() {
   handle('node:move', (nodeId, parentId, beforeId) => store.moveNode(nodeId, parentId, beforeId));
   handle('page:save', (pageId, objects, camera) => store.savePage(pageId, objects, camera));
   handle('page:style', (pageId, style) => store.setPageStyle(pageId, style));
+  handle('window:full-screen', (enabled) => {
+    if (typeof enabled !== 'boolean') throw new Error('Invalid fullscreen state');
+    window.setFullScreen(enabled);
+  });
   handle('asset:import', (name, mimeType, bytes) => store.importAsset(name, mimeType, bytes));
   handle('asset:read', (assetId) => store.readAsset(assetId));
   handle('asset:pick', async () => {
@@ -98,7 +102,7 @@ app.whenReady().then(() => {
   registerIpc();
 
   window = new BrowserWindow({
-    width: 1500, height: 930, minWidth: 1000, minHeight: 680,
+    width: 1500, height: 930, minWidth: 1000, minHeight: 680, show: false,
     backgroundColor: '#f7f7f8', title: 'omniNote', autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -107,6 +111,7 @@ app.whenReady().then(() => {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
+  window.once('ready-to-show', () => { window.maximize(); window.show(); });
   window.loadURL(process.argv.includes('--ink-lab') ? 'whiteboard://app/ink-lab.html' : 'whiteboard://app/dist-ui/index.html');
 });
 

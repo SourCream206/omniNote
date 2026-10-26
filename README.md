@@ -16,16 +16,17 @@ npm start
 ## Use
 
 - Create notebooks, nested folders, sections, and pages in one explorer tree. Pages sit directly under their section. Drag items to reorder or move them, double-click a title to rename it, drag the explorer's right edge to resize it, or use the notebook icon to collapse it.
-- Choose **Text**, then click the canvas to place a rich text note. **Select** picks or deselects existing objects without creating a note. Drag object headers to move; drag the lower-right handle to resize.
+- On a newly opened page, click the canvas and type directly on the paper. Text has a transparent background, so dots, grids, and lines remain visible underneath. The tool switches to **Select** after placing a note; choose **Text** again to place another. Use **Note box** in the toolbar or right-click empty canvas to add a colored box. Select text and open **Appearance** to change its color and opacity or return it to plain text. Drag a note's header to move it; drag the lower-right handle to resize it.
 - Use Pen or Highlight for pressure-aware vector strokes. Erase whole strokes or check **Partial** to split them. Lasso selects objects. Wheel zooms at the pointer; Space plus drag pans. Pen drawing ignores touch shortly after pen input.
 - Insert files with the page button or drag files onto the canvas. PDF, DOCX, XLSX, PPTX, text, Markdown, and HTML have in-canvas previews. Click **Interact** on a document to use its links and scroll, and **Open original** to launch the unchanged source file in its default app.
 - Use Ctrl+C/V for canvas objects, Ctrl+Z/Y for canvas undo/redo, Shift-click for multiple selection, and the toolbar for grouping and order. Rich text has its own editor undo while focused.
 - Use **Paper** on each page to choose Blank, Dots, Grid, or Lines. New pages start blank; existing workspaces keep their dotted pages when upgraded. The paper style is saved with the page and follows pan and zoom.
+- The window opens maximized. Use **Canvas full screen** on the toolbar to fill the display with the canvas; **Tools** reveals the toolbar in that mode, and **Exit full screen** returns to the notebook layout.
 - The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets) and a PDF of the current visible page view. Test restores by extracting the ZIP into an empty workspace directory with the app closed.
 
 ## Extensions
 
-Local extensions live in the workspace's `extensions/` directory. The bundled `whiteboard.date-insert` example is copied there on first launch. Its toolbar button runs in a worker and inserts today's date through the restricted `canvas.write` bridge. The Extensions panel enables or disables installed extensions. API 1.0 supports commands, toolbar/sidebar contributions, canvas object types, document viewers, import/export handlers, and settings. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md) for the manifest and message contracts.
+Local extensions live in the workspace's `extensions/` directory. The bundled `whiteboard.date-insert` example is copied there on first launch. Its toolbar button runs in a worker and inserts today's date through the restricted `canvas.write` bridge. The Extensions icon opens a searchable list in the resizable sidebar, with enable switches and inline settings. Search covers installed local extensions; there is no online marketplace in phase 1. API 1.0 supports commands, toolbar/sidebar contributions, canvas object types, document viewers, import/export handlers, and settings. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md) for the manifest and message contracts.
 
 ## Current limits and testing
 

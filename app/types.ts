@@ -6,7 +6,7 @@ export interface PageRow { id: string; camera_x: number; camera_y: number; camer
 export interface Asset { id: string; relative_path: string; original_name: string; mime_type: string; sha256: string; size: number; updated_at: string }
 export interface InkPoint { x: number; y: number; pressure: number; tiltX: number; tiltY: number; timestamp: number }
 export type ObjectPayload =
-  | { doc: unknown }
+  | { doc: unknown; appearance?: { color: string | null; opacity: number } }
   | { points: InkPoint[]; color: string; width: number; highlighter: boolean }
   | { assetId: string; name: string; format: string }
   | { extensionId: string; objectType: string; data: unknown };
@@ -50,6 +50,7 @@ export interface WhiteboardBridge {
   saveExtensionExport(name: string, bytes: Uint8Array): Promise<boolean>;
   exportWorkspace(): Promise<boolean>;
   exportPagePdf(): Promise<boolean>;
+  setFullScreen(enabled: boolean): Promise<void>;
 }
 
 declare global { interface Window { whiteboard: WhiteboardBridge } }

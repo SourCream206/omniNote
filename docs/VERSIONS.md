@@ -10,6 +10,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v3 | Document link fixtures and editor/input fixes | Build; `npm test`; PDF external and internal annotation rendering; DOCX external and bookmark link rendering; byte-identical imported originals; Select/Text behavior, text persistence, in-app create-page dialog, text undo/redo, and date extension in the desktop window. |
 | v4 | Extension contribution host, unified explorer, and page paper styles | Build; `npm test`; local extension manifest, grant, settings, resource, schema migration, and paper-style checks; desktop check of the nested page tree, resizable and collapsible explorer, single Export menu, and blank/grid/ruled paper. Enabling the broader demo extension through the UI still requires an explicit permission grant test. |
 | v5 | Duplicate-action cleanup and accurate renderer notes | Build and `npm test`; the demo toolbar command appears once, and the architecture notes distinguish measured behavior from targets. |
+| v6 | Paper menu fix, searchable Extensions sidebar, fullscreen canvas, direct text and note appearance | Build and `npm test`; desktop checks of maximized launch, paper menu over live canvas, grid change, extension search, direct text and colored note box, fullscreen enter/tools/exit. |
 
 ## v3 hands-on checks
 

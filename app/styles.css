@@ -133,3 +133,59 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .dialog-actions .primary { background:var(--ui-accent); border-color:var(--ui-accent); }
 @media (pointer:coarse) { .activity-rail { width:49px; flex-basis:49px; } .activity-rail button, .icon-button, .tool-group button, .rich-toolbar button { min-width:42px; min-height:42px; } .canvas-toolbar { height:50px; flex-basis:50px; } .rich-toolbar { height:44px; flex-basis:44px; } .tree-item { min-height:42px; } .new-page { min-height:42px; flex-basis:42px; } .sidebar-width-resizer { width:12px; right:-6px; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; transition-duration:.01ms !important; animation-duration:.01ms !important; } }
+
+/* The canvas and its controls share a quiet, flat surface. */
+.page-topline { position:relative; z-index:21; }
+.paper-menu, .export-menu { z-index:30; }
+.extensions-panel { display:flex; flex-direction:column; min-height:0; flex:1; }
+.extension-count { color:#8793a4; font-weight:600; letter-spacing:0; }
+.extension-search { height:33px; flex:0 0 33px; margin:2px 10px 9px; padding:0 9px; display:flex; align-items:center; gap:7px; border:1px solid #dfe5ec; border-radius:5px; color:#7b8999; background:#fff; }
+.extension-search:focus-within { border-color:#8daacb; }
+.extension-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:#243247; font-size:11px; }
+.extension-search button { border:0; background:transparent; padding:2px; color:#748397; display:grid; place-items:center; }
+.extensions-list { min-height:0; flex:1; overflow:auto; scrollbar-width:thin; }
+.extension-entry { padding:10px 12px 11px; border-top:1px solid #e9edf1; }
+.extension-entry-main { display:flex; align-items:center; gap:9px; min-width:0; }
+.extension-entry-main>svg { flex:0 0 auto; color:#647991; }
+.extension-entry-main>div { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.extension-entry-main strong { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; font-weight:650; }
+.extension-entry-main small, .extension-entry-detail { color:#7b8797; font-size:10px; }
+.extension-entry-detail { display:flex; align-items:center; justify-content:space-between; gap:5px; margin:6px 0 0 27px; }
+.extension-entry-detail span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.extension-entry-detail button { flex:0 0 auto; display:flex; align-items:center; gap:2px; border:0; background:transparent; color:#48688b; padding:2px; font-size:10px; }
+.extension-settings { margin:9px 0 0 27px; display:grid; gap:8px; }
+.extension-settings label { display:flex; align-items:center; justify-content:space-between; gap:7px; color:#5d6d7e; font-size:10px; }
+.extension-settings input[type=text] { width:110px; min-width:0; border:1px solid #dce3ea; border-radius:4px; padding:4px; }
+.extensions-empty { margin:17px 14px; color:#7b8797; font-size:11px; line-height:1.5; }
+.extensions-location { margin:0; padding:10px 13px; border-top:1px solid #e9edf1; color:#7b8797; font-size:10px; line-height:1.4; }
+.extensions-location code { color:#52657c; font-size:10px; }
+.mini-toggle input { width:15px; height:15px; cursor:pointer; }
+
+.canvas-shell.focus-canvas { position:relative; border:0; border-radius:0; }
+.focus-mode .app-header, .focus-mode .activity-rail, .focus-mode .notebook-sidebar, .focus-mode .page-topline { display:none; }
+.focus-mode .editor-area { padding:0; }
+.focus-controls { position:absolute; top:9px; right:10px; z-index:40; display:flex; gap:5px; }
+.focus-controls button { display:flex; align-items:center; gap:5px; height:31px; padding:0 10px; border:1px solid #dce3eb; border-radius:5px; background:#fff; color:#485b72; font-size:11px; box-shadow:0 2px 8px #152b4714; }
+.focus-controls button:hover { background:#f4f7fa; }
+.canvas-toolbar.focus-floating { position:absolute; top:45px; left:10px; right:10px; z-index:38; height:40px; flex-basis:auto; border:1px solid #dce3eb; border-radius:5px; box-shadow:0 3px 12px #152b4718; background:#fff; }
+.focus-canvas .rich-toolbar { position:absolute; top:88px; left:10px; right:10px; z-index:37; border:1px solid #dce3eb; border-radius:5px; box-shadow:0 3px 12px #152b4718; }
+.rich-toolbar { position:relative; z-index:15; overflow:visible; }
+.note-appearance { position:relative; margin-left:auto; }
+.note-appearance>button { padding:0 8px; white-space:nowrap; }
+.appearance-menu { position:absolute; top:29px; right:0; z-index:50; width:215px; padding:8px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
+.appearance-menu>button { width:100%; height:29px; justify-content:flex-start; padding:0 7px; }
+.appearance-menu label { display:flex; align-items:center; justify-content:space-between; gap:7px; padding:6px 4px; color:#5f6f80; font-size:11px; }
+.appearance-menu input[type=color] { width:40px; height:25px; border:0; background:transparent; padding:0; cursor:pointer; }
+.appearance-menu input[type=range] { min-width:0; width:95px; accent-color:#49749f; }
+.appearance-menu label span { min-width:29px; text-align:right; }
+.canvas-object.object-text { background:transparent; box-shadow:none; border:0; border-radius:2px; }
+.canvas-object.object-text.boxed-note { border:1px solid #7389a025; }
+.object-text .object-header { position:absolute; top:-26px; left:0; right:0; z-index:3; height:25px; border:1px solid #dce3eb; border-radius:4px; background:#fff; opacity:0; pointer-events:none; box-shadow:0 2px 7px #1b2d4b13; }
+.object-text:hover .object-header, .object-text.selected .object-header { opacity:1; pointer-events:auto; }
+.object-text .text-body { padding:0 2px; }
+.object-text.boxed-note .text-body { padding:8px 10px; }
+.object-text .rich-content p { margin:0; }
+.canvas-viewport[data-paper=lines] .object-text:not(.boxed-note) .rich-content { line-height:32px; }
+.canvas-context-menu { position:absolute; z-index:35; min-width:143px; padding:4px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
+.canvas-context-menu button { display:flex; align-items:center; gap:8px; width:100%; border:0; border-radius:4px; background:transparent; padding:7px 8px; color:#4b5e73; text-align:left; font-size:11px; }
+.canvas-context-menu button:hover { background:#f2f6fb; }

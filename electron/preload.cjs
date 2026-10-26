@@ -22,4 +22,5 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   saveExtensionExport: (name, bytes) => invoke('export:save', name, bytes),
   exportWorkspace: () => invoke('workspace:export'),
   exportPagePdf: () => invoke('page:export-pdf'),
+  setFullScreen: (enabled) => invoke('window:full-screen', enabled),
 }));

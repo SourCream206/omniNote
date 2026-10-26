@@ -5,25 +5,28 @@ import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { Bold, Italic, Underline as UnderlineIcon, Heading1, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, FileUp, Maximize2, ChevronDown, MoreHorizontal, Type } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, Heading1, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, MoreHorizontal, Type, StickyNote } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset): void; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 const clone = (objects: CanvasObject[]) => objects.map((object) => ({ ...object, payload: structuredClone(object.payload) }));
 const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
+type TextAppearance = { color: string | null; opacity: number };
+const textAppearance = (object: CanvasObject): TextAppearance => (object.payload as { appearance?: TextAppearance }).appearance ?? { color: null, opacity: 100 };
+const paperColor = (appearance: TextAppearance) => appearance.color ? `${appearance.color}${Math.round(clamp(appearance.opacity, 0, 100) * 255 / 100).toString(16).padStart(2, '0')}` : 'transparent';
 let canvasClipboard: CanvasObject[] = [];
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [tool, setTool] = useState<CanvasTool>('select');
+  const [tool, setTool] = useState<CanvasTool>('text');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
   const [selected, setSelected] = useState<string[]>([]);
@@ -35,11 +38,21 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [partialEraser, setPartialEraser] = useState(false);
   const [formatOpen, setFormatOpen] = useState(true);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [focusToolsOpen, setFocusToolsOpen] = useState(false);
+  const [focusTextId, setFocusTextId] = useState<string | null>(null);
+  const [contextPoint, setContextPoint] = useState<Point | null>(null);
+  useEffect(() => { if (focusMode) setFocusToolsOpen(false); }, [focusMode]);
+  useEffect(() => {
+    if (!contextPoint) return;
+    const close = (event: PointerEvent) => { if (!(event.target as HTMLElement).closest('.canvas-context-menu')) setContextPoint(null); };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [contextPoint]);
   useEffect(() => {
     if (!actionsOpen) return;
     const close = (event: PointerEvent) => { if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false); };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
   }, [actionsOpen]);
   const [viewportSize, setViewportSize] = useState({ width: 1000, height: 650 });
   const [localAssets, setLocalAssets] = useState(assets);
@@ -103,9 +116,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const element = viewport.current;
     return { x: ((element?.clientWidth ?? 900) / 2 - current.x) / current.zoom, y: ((element?.clientHeight ?? 600) / 2 - current.y) / current.zoom };
   }
-  function createText(x: number, y: number, text = '') {
-    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'text', x, y, width: 300, height: 165, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { doc: emptyDoc(text) } };
+  function createText(x: number, y: number, text = '', boxed = false) {
+    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'text', x, y: row.paper_style === 'lines' ? Math.round(y / 32) * 32 : y, width: 300, height: 165, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { doc: emptyDoc(text), appearance: { color: boxed ? '#fff1b8' : null, opacity: 90 } } };
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
+    if (!text) setFocusTextId(object.id);
+  }
+  function setAppearance(id: string, appearance: TextAppearance) {
+    commit(objectsRef.current.map((object) => object.id === id && object.type === 'text' ? { ...object, payload: { ...object.payload, appearance } } : object));
   }
   function insertAsset(asset: Asset) {
     const ext = asset.original_name.split('.').pop()?.toLowerCase() ?? '';
@@ -255,7 +272,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     });
     commit([...objectsRef.current, ...copies]); updateSelected(copies.map((item) => item.id)); canvasClipboard = clone(copies);
   }
-  function updateText(id: string, doc: unknown) { updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, payload: { doc } } : object)); }
+  function updateText(id: string, doc: unknown) { updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, payload: { ...object.payload, doc } } : object)); }
   function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, clone(objectsRef.current)); }
   function endTextEdit(id: string) { const before = textEditStart.current.get(id); if (before) { record(before); textEditStart.current.delete(id); } }
 
@@ -287,23 +304,24 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const selectedObject = objects.find((object) => selected.includes(object.id));
   const viewerFor = (format: string) => extensions.filter((item) => item.enabled && item.grantedPermissions.includes('asset.read')).flatMap((extension) => (extension.manifest.contributes.documentViewers ?? []).filter((entry) => entry.extensions.includes(format)).map((entry) => ({ extension, entry: entry.entry })))[0];
 
-  return <div className="canvas-shell">
-    <div className="canvas-toolbar">
-      <div className="tool-group"><ToolButton icon={<MousePointer2 size={16} />} name="Select" tool="select" active={tool} onClick={updateTool} /><ToolButton icon={<FileUp size={16} />} name="Text" tool="text" active={tool} onClick={updateTool} /></div>
+  return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
+    {focusMode && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button><button onClick={onToggleFocus} title="Exit full screen"><Minimize2 size={15} /> Exit full screen</button></div>}
+    {(!focusMode || focusToolsOpen) && <div className={`canvas-toolbar ${focusMode ? 'focus-floating' : ''}`}>
+      <div className="tool-group"><ToolButton icon={<MousePointer2 size={16} />} name="Select" tool="select" active={tool} onClick={updateTool} /><ToolButton icon={<Type size={16} />} name="Text" tool="text" active={tool} onClick={updateTool} /><button title="Add note box" onClick={() => { const point = centerWorld(); createText(point.x - 150, point.y - 80, '', true); }}><StickyNote size={16} /><span>Note box</span></button></div>
       <div className="toolbar-divider" />
       <div className="tool-group"><ToolButton icon={<PenLine size={16} />} name="Pen" tool="pen" active={tool} onClick={updateTool} /><ToolButton icon={<Highlighter size={16} />} name="Highlight" tool="highlighter" active={tool} onClick={updateTool} /><ToolButton icon={<Eraser size={16} />} name="Erase" tool="eraser" active={tool} onClick={updateTool} /><ToolButton icon={<Scan size={16} />} name="Lasso" tool="lasso" active={tool} onClick={updateTool} /><ToolButton icon={<Hand size={16} />} name="Pan" tool="hand" active={tool} onClick={updateTool} /></div>
       <div className="toolbar-divider" />
       <div className="tool-group"><label className="color-control" title="Ink color"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label><input className="width-slider" aria-label="Pen width" type="range" min="1" max="24" value={width} onChange={(event) => setWidth(Number(event.target.value))} /><span className="width-value">{width}px</span>{tool === 'eraser' && <label className="partial-toggle"><input type="checkbox" checked={partialEraser} onChange={(event) => setPartialEraser(event.target.checked)} /> Partial</label>}</div>
       <div className="toolbar-spacer" />
-      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<div className="object-actions" ref={actionsRef} onKeyDown={(event) => { if (event.key === 'Escape') setActionsOpen(false); }}><button title="More object actions" aria-label="More object actions" aria-expanded={actionsOpen} onClick={() => setActionsOpen((open) => !open)}><MoreHorizontal size={17} /></button>{actionsOpen && <div className="object-actions-menu"><button disabled={!selected.length} onClick={() => { copySelected(); setActionsOpen(false); }}><Copy size={15} /> Copy</button><button disabled={selected.length < 2} onClick={() => { groupSelected(); setActionsOpen(false); }}><Group size={15} /> Group</button><button disabled={!selected.length} onClick={() => { ungroupSelected(); setActionsOpen(false); }}><Ungroup size={15} /> Ungroup</button><button disabled={!selected.length} onClick={() => { zOrder(true); setActionsOpen(false); }}><BringToFront size={15} /> Bring to front</button><button disabled={!selected.length} onClick={() => { zOrder(false); setActionsOpen(false); }}><SendToBack size={15} /> Send to back</button><button disabled={!selected.length} onClick={() => { deleteSelected(); setActionsOpen(false); }}><Trash2 size={15} /> Delete</button></div>}</div></div>
+      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<div className="object-actions" ref={actionsRef} onKeyDown={(event) => { if (event.key === 'Escape') setActionsOpen(false); }}><button title="More object actions" aria-label="More object actions" aria-expanded={actionsOpen} onClick={() => setActionsOpen((open) => !open)}><MoreHorizontal size={17} /></button>{actionsOpen && <div className="object-actions-menu"><button disabled={!selected.length} onClick={() => { copySelected(); setActionsOpen(false); }}><Copy size={15} /> Copy</button><button disabled={selected.length < 2} onClick={() => { groupSelected(); setActionsOpen(false); }}><Group size={15} /> Group</button><button disabled={!selected.length} onClick={() => { ungroupSelected(); setActionsOpen(false); }}><Ungroup size={15} /> Ungroup</button><button disabled={!selected.length} onClick={() => { zOrder(true); setActionsOpen(false); }}><BringToFront size={15} /> Bring to front</button><button disabled={!selected.length} onClick={() => { zOrder(false); setActionsOpen(false); }}><SendToBack size={15} /> Send to back</button><button disabled={!selected.length} onClick={() => { deleteSelected(); setActionsOpen(false); }}><Trash2 size={15} /> Delete</button></div>}</div><button title="Canvas full screen" onClick={onToggleFocus}><Maximize2 size={16} /></button></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
-    </div>
-    {selectedObject?.type === 'text' && formatOpen && <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} />}
-    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => event.preventDefault()} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
+    </div>}
+    {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
+    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextPoint) setContextPoint(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if (!(event.target as HTMLElement).closest('.canvas-object')) setContextPoint(screen(event.nativeEvent)); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
-        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: object.z_index }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
+        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && <div className="object-header" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><span className="drag-grip">⋮⋮</span><span>{object.type === 'text' ? 'Note' : (object.payload as { name?: string }).name ?? object.type}</span>{(object.type === 'document' || object.type === 'extension') && <button type="button" title="Enter document" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}><Maximize2 size={12} /> {activeDoc === object.id ? 'Exit' : 'Interact'}</button>}</div>}
-          {object.type === 'text' && <TextBlock object={object} onChange={(doc) => updateText(object.id, doc)} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => updateSelected([object.id])} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} />}
+          {object.type === 'text' && <TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => updateSelected([object.id])} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} />}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} />}
           {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
@@ -313,6 +331,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
         {lasso.length > 1 && <svg className="lasso-overlay" overflow="visible"><polyline points={lasso.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#4471d0" strokeWidth={2 / camera.zoom} strokeDasharray="5 4" /></svg>}
       </div>
+      {contextPoint && <div className="canvas-context-menu" style={{ left: contextPoint.x, top: contextPoint.y }} onPointerDown={(event) => event.stopPropagation()}><button onClick={() => { const point = world(contextPoint); createText(point.x, point.y, '', true); setContextPoint(null); }}><StickyNote size={15} /> Add note box</button><button onClick={() => { const point = world(contextPoint); createText(point.x, point.y); setContextPoint(null); }}><Type size={15} /> Add text</button></div>}
       <div className="canvas-zoom"><button onClick={() => zoomAt(0.8, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Minus size={15} /></button><span>{Math.round(camera.zoom * 100)}%</span><button onClick={() => zoomAt(1.25, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Plus size={15} /></button><button title="Reset view" onClick={() => updateCamera({ x: 0, y: 0, zoom: 1 })}><Maximize2 size={15} /></button></div>
     </div>
   </div>;
@@ -321,13 +340,21 @@ export default Canvas;
 
 function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} aria-pressed={active === tool} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
 
-function RichToolbar({ selectedObject, onAction, onRequestLink, nodes }: { selectedObject?: CanvasObject; onAction(action: string): void; onRequestLink(): Promise<string | null>; nodes: TreeNode[] }) {
+function RichToolbar({ selectedObject, onAction, onRequestLink, nodes, appearance, onAppearance }: { selectedObject?: CanvasObject; onAction(action: string): void; onRequestLink(): Promise<string | null>; nodes: TreeNode[]; appearance: TextAppearance; onAppearance(value: TextAppearance): void }) {
   const active = selectedObject?.type === 'text';
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const appearanceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!appearanceOpen) return;
+    const close = (event: PointerEvent) => { if (!appearanceRef.current?.contains(event.target as Node)) setAppearanceOpen(false); };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [appearanceOpen]);
   const link = async () => { const url = await onRequestLink(); if (url) onAction(`link:${url}`); };
-  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><button title="Heading" disabled={!active} onClick={() => onAction('heading')}><Heading1 size={15} /></button><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} /></div>;
+  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><button title="Heading" disabled={!active} onClick={() => onAction('heading')}><Heading1 size={15} /></button><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} /><div className="note-appearance" ref={appearanceRef}><button title="Note appearance" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((open) => !open)}><StickyNote size={15} /> Appearance</button>{appearanceOpen && <div className="appearance-menu"><button onClick={() => onAppearance({ ...appearance, color: null })}>Plain text on paper</button><label>Box color <input aria-label="Note box color" type="color" value={appearance.color ?? '#fff1b8'} onChange={(event) => onAppearance({ ...appearance, color: event.target.value })} /></label><label>Opacity <input aria-label="Note box opacity" type="range" min="0" max="100" value={appearance.opacity} onChange={(event) => onAppearance({ ...appearance, color: appearance.color ?? '#fff1b8', opacity: Number(event.target.value) })} /><span>{appearance.opacity}%</span></label></div>}</div></div>;
 }
 
-function TextBlock({ object, onChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; onChange(doc: unknown): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
+function TextBlock({ object, autoFocus, onChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; autoFocus: boolean; onChange(doc: unknown): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
   const editor = useEditor({ extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), TaskList, TaskItem.configure({ nested: true })], content: (object.payload as { doc: unknown }).doc as object, onUpdate: ({ editor }) => onChange(editor.getJSON()), editorProps: { attributes: { class: 'rich-content' }, handleClick: (_view, _pos, event) => {
     const link = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
     if (!link) return false;
@@ -342,6 +369,7 @@ function TextBlock({ object, onChange, onNavigatePage, onOpenExternal, onSelect,
     const next = (object.payload as { doc: unknown }).doc;
     if (JSON.stringify(editor.getJSON()) !== JSON.stringify(next)) editor.commands.setContent(next as object, { emitUpdate: false });
   }, [editor, object.payload]);
+  useEffect(() => { if (editor && autoFocus) editor.commands.focus('end'); }, [editor, autoFocus]);
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ id: string; action: string }>).detail;
