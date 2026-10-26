@@ -125,6 +125,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }, [page.id]);
 
   useEffect(() => setLocalAssets(assets), [assets]);
+  useEffect(() => {
+    const current = objectsRef.current;
+    const compacted = current.map((object) => object.type === 'audio' && object.height > 54 && !(object.payload as { audioCompact?: boolean }).audioCompact
+      ? { ...object, y: object.y + (object.height - 54) / 2, height: 54, payload: { ...object.payload, audioCompact: true } }
+      : object);
+    if (compacted.some((object, index) => object !== current[index])) updateObjects(compacted);
+  }, [page.id]);
 
   function record(before: CanvasObject[]) {
     if (JSON.stringify(before) === JSON.stringify(objectsRef.current)) return;
@@ -196,7 +203,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     }
     const center = centerWorld();
     const offset = (objectsRef.current.filter((item) => item.type !== 'ink').length % 6) * 28;
-    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block' } };
+    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block', ...(type === 'audio' ? { audioCompact: true } : {}) } };
     setLocalAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
     commit([...objectsRef.current, object]); updateSelected([]); updateTool('select');
   }
@@ -217,7 +224,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }
 
   function startObjectGesture(event: React.PointerEvent, object: CanvasObject, kind: 'move' | 'resize') {
-    if (toolRef.current !== 'select' && object.type !== 'text') return;
+    const explicitHandle = Boolean((event.target as HTMLElement).closest('.audio-move-handle, .attachment-move, .note-move-handle'));
+    if (toolRef.current !== 'select' && object.type !== 'text' && !explicitHandle) return;
     event.stopPropagation(); event.preventDefault();
     const group = object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id];
     const nextSelected = event.shiftKey ? [...new Set([...selectedRef.current, ...group])] : selectedRef.current.includes(object.id) ? selectedRef.current : group;
@@ -287,7 +295,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         const scale = Math.max(90 / object.width, 70 / object.height, 1 + change);
         return { ...object, width: object.width * scale, height: object.height * scale };
       }
-      return { ...object, width: Math.max(90, object.width + dx), height: Math.max(70, object.height + dy) };
+      return { ...object, width: Math.max(90, object.width + dx), height: Math.max(object.type === 'audio' ? 54 : 70, object.height + dy) };
     })); return; }
     if (current.kind === 'erase') { updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser)); return; }
     if (current.kind === 'lasso') { current.lasso!.push(position); setLasso([...current.lasso!]); return; }
@@ -444,7 +452,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
           {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} />}
-          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} />}
+          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} />}
           {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
@@ -522,7 +530,7 @@ function ImageBlock({ assetId, onLoad }: { assetId: string; onLoad(width: number
   return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} /> : <div className="image-loading">Loading image…</div>;
 }
 
-function MediaBlock({ object, asset, onSelect }: { object: CanvasObject; asset?: Asset; onSelect(): void }) {
+function MediaBlock({ object, asset, onSelect, onMove }: { object: CanvasObject; asset?: Asset; onSelect(): void; onMove(event: React.PointerEvent): void }) {
   const assetId = (object.payload as { assetId: string }).assetId;
   const format = (object.payload as { format: string }).format;
   const mediaMime: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4', ogv: 'video/ogg' };
@@ -536,7 +544,7 @@ function MediaBlock({ object, asset, onSelect }: { object: CanvasObject; asset?:
     return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId, asset?.mime_type, format]);
   if (!url) return <div className="image-loading">Loading media…</div>;
-  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} />;
+  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /><button className="audio-move-handle" type="button" title="Drag audio" aria-label="Drag audio" onPointerDown={onMove} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} />;
 }
 
 function ExtensionObject({ object, extensions, interactive, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onError(error: unknown): void }) {

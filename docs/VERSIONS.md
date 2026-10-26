@@ -17,6 +17,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v10 | Clipboard, media, document printouts, and compact attachment menus | Build; storage and document fixture tests on Node 24; isolated desktop checks of text and image copy/paste, PDF and DOCX printouts, MP4 and WAV playback controls, ink over a PDF, and the attachment and Insert menus. Dropping files and stylus feel still need a device check. |
 | v11 | Frameless attachments and click-to-show controls | Build; isolated desktop check that existing images fit their own bounds without white margins, attachment controls appear after selection and disappear after deselection, and media and printouts retain their content. |
 | v12 | Remove misleading interaction hint | Build; desktop check that document previews no longer expose the double-click hover label. Use the attachment menu's Interact with content action to enter a document or extension. |
+| v13 | Compact in-player audio drag grip | Build; isolated desktop check that the grip sits inside the audio pill and moves an audio attachment in the default Text mode. Older audio blocks are reduced to the player's height once. |
 
 ## v3 hands-on checks
 

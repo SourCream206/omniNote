@@ -218,8 +218,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .canvas-object:not(.object-text):not(.object-ink) { border:0; border-radius:0; background:transparent; box-shadow:none; }
 .image-body { display:block; width:100%; height:100%; object-fit:fill; }
 .media-body { width:100%; height:100%; }
-.audio-body { display:flex; align-items:center; padding:0; }
-.audio-body audio { width:100%; height:100%; }
+.audio-body { position:relative; display:block; padding:0; }
+.audio-body audio { display:block; width:100%; height:100%; }
+.audio-move-handle { position:absolute; top:2px; left:50%; transform:translateX(-50%); z-index:2; width:42px; height:12px; padding:0; border:0; border-radius:6px; background:transparent; cursor:grab; }
+.audio-move-handle::before { content:""; display:block; width:22px; height:3px; margin:auto; border-radius:3px; background:#8a96a4; opacity:.65; }
+.audio-move-handle:hover { background:#dce4eb9c; }
+.audio-move-handle:hover::before { opacity:1; background:#536980; }
+.audio-move-handle:active { cursor:grabbing; }
+.object-audio .attachment-menu { top:-29px; left:0; }
+.object-audio .attachment-move { display:none; }
 .video-body { display:block; background:#172334; object-fit:contain; }
 .canvas-object.object-document.printout { border:0; box-shadow:none; background:transparent; }
 .canvas-object.object-document.printout-docx { border:0; box-shadow:none; background:transparent; }
