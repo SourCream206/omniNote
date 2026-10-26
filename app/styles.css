@@ -191,3 +191,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .canvas-context-menu { position:absolute; z-index:35; min-width:143px; padding:4px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
 .canvas-context-menu button { display:flex; align-items:center; gap:8px; width:100%; border:0; border-radius:4px; background:transparent; padding:7px 8px; color:#4b5e73; text-align:left; font-size:11px; }
 .canvas-context-menu button:hover { background:#f2f6fb; }
+
+/* Contextual formatting floats above the page, leaving canvas coordinates fixed. */
+.canvas-shell { position:relative; }
+.canvas-shell > .rich-toolbar { position:absolute; top:38px; left:0; right:0; z-index:20; flex:none; box-shadow:0 3px 9px #152b4712; }
+.focus-canvas > .rich-toolbar { top:88px; left:10px; right:10px; z-index:37; }
+@media (pointer:coarse) { .canvas-shell:not(.focus-canvas) > .rich-toolbar { top:50px; } }

@@ -12,6 +12,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v5 | Duplicate-action cleanup and accurate renderer notes | Build and `npm test`; the demo toolbar command appears once, and the architecture notes distinguish measured behavior from targets. |
 | v6 | Paper menu fix, searchable Extensions sidebar, fullscreen canvas, direct text and note appearance | Build and `npm test`; desktop checks of maximized launch, paper menu over live canvas, grid change, extension search, direct text and colored note box, fullscreen enter/tools/exit. |
 | v7 | Direct note interaction without the title strip | Build and `npm test`; desktop checks that clicks in empty text regions resume editing, clicking between overlapping notes edits the chosen note, and the compact move handle repositions it. |
+| v8 | Contextual formatting without canvas movement | Build and `npm test`; the text formatting row is positioned over the canvas instead of participating in its layout, including the normal, touch, and full-screen toolbar positions. |
 
 ## v3 hands-on checks
 
