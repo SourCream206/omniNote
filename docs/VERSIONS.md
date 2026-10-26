@@ -16,6 +16,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v9 | Text size control | Build with Tiptap's font-size extension; storage and document fixture tests on Node 24; desktop check that selecting a note shows the size list in place of the heading button. |
 | v10 | Clipboard, media, document printouts, and compact attachment menus | Build; storage and document fixture tests on Node 24; isolated desktop checks of text and image copy/paste, PDF and DOCX printouts, MP4 and WAV playback controls, ink over a PDF, and the attachment and Insert menus. Dropping files and stylus feel still need a device check. |
 | v11 | Frameless attachments and click-to-show controls | Build; isolated desktop check that existing images fit their own bounds without white margins, attachment controls appear after selection and disappear after deselection, and media and printouts retain their content. |
+| v12 | Remove misleading interaction hint | Build; desktop check that document previews no longer expose the double-click hover label. Use the attachment menu's Interact with content action to enter a document or extension. |
 
 ## v3 hands-on checks
 

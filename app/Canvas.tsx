@@ -445,8 +445,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} />}
           {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} />}
-          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
-          {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
+          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
+          {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
         </div>)}
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
@@ -539,10 +539,10 @@ function MediaBlock({ object, asset, onSelect }: { object: CanvasObject; asset?:
   return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} />;
 }
 
-function ExtensionObject({ object, extensions, interactive, onEnter, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {
+function ExtensionObject({ object, extensions, interactive, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onError(error: unknown): void }) {
   const payload = object.payload as { extensionId: string; objectType: string; data: unknown };
   const extension = extensions.find((item) => item.enabled && item.manifest.id === payload.extensionId);
   const entry = extension?.manifest.contributes.canvasObjectTypes?.find((item) => item.type === payload.objectType)?.entry;
   if (!extension || !entry) return <div className="extension-placeholder">Extension object unavailable: {payload.objectType}</div>;
-  return <ExtensionFrame extension={extension} entry={entry} kind="canvas-object" data={payload.data} interactive={interactive} onEnter={onEnter} onError={onError} />;
+  return <ExtensionFrame extension={extension} entry={entry} kind="canvas-object" data={payload.data} interactive={interactive} onError={onError} />;
 }
