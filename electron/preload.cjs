@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   importAsset: (name, mimeType, bytes) => invoke('asset:import', name, mimeType, bytes),
   pickAssets: () => invoke('asset:pick'),
   readAsset: (assetId) => invoke('asset:read', assetId),
+  copyImage: (assetId) => invoke('clipboard:copy-image', assetId),
+  copyText: (text) => invoke('clipboard:copy-text', text),
   openOriginal: (assetId) => invoke('asset:open', assetId),
   openExternal: (url) => invoke('link:open', url),
   listExtensions: () => invoke('extension:list'),

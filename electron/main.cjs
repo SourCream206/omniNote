@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, net, protocol, session, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -32,6 +32,15 @@ function registerIpc() {
   });
   handle('asset:import', (name, mimeType, bytes) => store.importAsset(name, mimeType, bytes));
   handle('asset:read', (assetId) => store.readAsset(assetId));
+  handle('clipboard:copy-image', (assetId) => {
+    const image = nativeImage.createFromPath(store.assetPath(assetId).absolutePath);
+    if (image.isEmpty()) throw new Error('This image format cannot be copied to the system clipboard');
+    return clipboard.write([new ClipboardItem({ 'image/png': new Blob([image.toPNG()], { type: 'image/png' }) })]);
+  });
+  handle('clipboard:copy-text', (text) => {
+    if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text');
+    return clipboard.writeText(text);
+  });
   handle('asset:pick', async () => {
     const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
     if (result.canceled) return [];

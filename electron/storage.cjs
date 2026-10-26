@@ -6,7 +6,7 @@ const { DatabaseSync } = require('node:sqlite');
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
 const validKinds = new Set(['notebook', 'folder', 'section', 'page']);
-const validTypes = new Set(['text', 'ink', 'image', 'document', 'extension']);
+const validTypes = new Set(['text', 'ink', 'image', 'audio', 'video', 'document', 'extension']);
 const paperStyles = new Set(['blank', 'dots', 'grid', 'lines']);
 const allowedParents = {
   notebook: [null],

@@ -14,6 +14,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v7 | Direct note interaction without the title strip | Build and `npm test`; desktop checks that clicks in empty text regions resume editing, clicking between overlapping notes edits the chosen note, and the compact move handle repositions it. |
 | v8 | Contextual formatting without canvas movement | Build and `npm test`; the text formatting row is positioned over the canvas instead of participating in its layout, including the normal, touch, and full-screen toolbar positions. |
 | v9 | Text size control | Build with Tiptap's font-size extension; storage and document fixture tests on Node 24; desktop check that selecting a note shows the size list in place of the heading button. |
+| v10 | Clipboard, media, document printouts, and compact attachment menus | Build; storage and document fixture tests on Node 24; isolated desktop checks of text and image copy/paste, PDF and DOCX printouts, MP4 and WAV playback controls, ink over a PDF, and the attachment and Insert menus. Dropping files and stylus feel still need a device check. |
 
 ## v3 hands-on checks
 

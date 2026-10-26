@@ -9,7 +9,7 @@
   .canvas-shell { border: 0; border-radius: 0; }
   .canvas-viewport { border: 0; }
   .canvas-object.selected { outline: none; }
-  .resize-handle, .object-header button, .note-move-handle, .document-shield { display: none !important; }
+  .resize-handle, .attachment-menu, .note-move-handle, .document-shield { display: none !important; }
 }
 .input-dialog { width: min(390px, 90vw); }
 .input-dialog .modal-head { align-items: center; }
@@ -195,6 +195,32 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 /* Contextual formatting floats above the page, leaving canvas coordinates fixed. */
 .canvas-shell { position:relative; }
 .canvas-shell > .rich-toolbar { position:absolute; top:38px; left:0; right:0; z-index:20; flex:none; box-shadow:0 3px 9px #152b4712; }
+.canvas-shell > .canvas-toolbar { z-index:25; }
 .focus-canvas > .rich-toolbar { top:88px; left:10px; right:10px; z-index:37; }
 @media (pointer:coarse) { .canvas-shell:not(.focus-canvas) > .rich-toolbar { top:50px; } }
 .rich-toolbar .font-size-select { appearance:auto; width:96px; height:26px; margin-left:0; padding:0 5px; border:1px solid #dce3eb; border-radius:4px; background:#fff; color:#52657d; }
+.insert-control { position:relative; }
+.page-topline { z-index:30; }
+.insert-menu { position:absolute; top:35px; right:0; z-index:32; width:185px; padding:4px; border:1px solid #dbe3ed; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
+.insert-menu button { display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; border:0; border-radius:4px; padding:7px 9px; background:transparent; color:#52627a; font-size:11px; text-align:left; }
+.insert-menu button:hover { background:#f2f6fb; color:var(--ui-accent); }
+.insert-menu small { color:#8a97a8; font-size:10px; }
+.live-ink, .lasso-overlay { z-index:2147483647; }
+.attachment-menu { position:absolute; top:6px; left:6px; z-index:8; display:flex; align-items:flex-start; gap:3px; }
+.attachment-menu > button { width:25px; height:25px; display:grid; place-items:center; padding:0; border:1px solid #d6dfe8; border-radius:4px; background:#fffffff2; color:#60748b; box-shadow:0 1px 4px #152b4718; }
+.attachment-menu > button:hover { background:#fff; color:#315e8c; }
+.attachment-menu .attachment-move { opacity:0; pointer-events:none; cursor:move; }
+.canvas-object:hover .attachment-move, .canvas-object.selected .attachment-move { opacity:1; pointer-events:auto; }
+.attachment-popover { position:absolute; top:29px; left:0; width:178px; display:grid; gap:2px; padding:5px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
+.attachment-popover strong { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; padding:5px 7px; color:#63748b; font-size:10px; font-weight:650; }
+.attachment-popover button { border:0; border-radius:4px; padding:7px; background:transparent; color:#4b5e73; font-size:11px; text-align:left; }
+.attachment-popover button:hover { background:#f2f6fb; color:var(--ui-accent); }
+.image-body { height:100%; }
+.media-body { width:100%; height:100%; }
+.audio-body { display:flex; align-items:center; padding:12px; }
+.audio-body audio { width:100%; }
+.video-body { display:block; background:#172334; object-fit:contain; }
+.canvas-object.object-document.printout { border:0; box-shadow:none; background:transparent; }
+.canvas-object.object-document.printout-docx { border:1px solid #e1e6ed; box-shadow:0 2px 9px #2235501a; background:#fff; }
+.document-printout .document-content { overflow:visible; background:transparent; }
+.document-printout .pdf-content { height:auto; overflow:visible; padding:8px; }

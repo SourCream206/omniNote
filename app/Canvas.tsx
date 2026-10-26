@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { pdfjs } from 'react-pdf';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -12,7 +13,7 @@ import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset): void; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -22,7 +23,28 @@ const clamp = (number: number, min: number, max: number) => Math.max(min, Math.m
 type TextAppearance = { color: string | null; opacity: number };
 const textAppearance = (object: CanvasObject): TextAppearance => (object.payload as { appearance?: TextAppearance }).appearance ?? { color: null, opacity: 100 };
 const paperColor = (appearance: TextAppearance) => appearance.color ? `${appearance.color}${Math.round(clamp(appearance.opacity, 0, 100) * 255 / 100).toString(16).padStart(2, '0')}` : 'transparent';
+function plainTextOf(node: unknown): string {
+  if (!node || typeof node !== 'object') return '';
+  const value = node as { text?: string; content?: unknown[]; type?: string };
+  if (typeof value.text === 'string') return value.text;
+  const content = value.content?.map(plainTextOf).join(value.type === 'doc' ? '\n' : '') ?? '';
+  return value.type === 'paragraph' || value.type === 'heading' ? `${content}\n` : content;
+}
+async function pdfPrintoutHeight(assetId: string, width: number) {
+  const loading = pdfjs.getDocument({ data: new Uint8Array(await window.whiteboard.readAsset(assetId)) });
+  try {
+    const pdf = await loading.promise;
+    let height = 16;
+    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 50); pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const size = page.getViewport({ scale: 1 });
+      height += (width - 24) * size.height / size.width + 8;
+    }
+    return height;
+  } finally { await loading.destroy(); }
+}
 let canvasClipboard: CanvasObject[] = [];
+let canvasClipboardText = '';
 
 const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -40,6 +62,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [formatOpen, setFormatOpen] = useState(true);
   const [selectedFontSize, setSelectedFontSize] = useState<{ id: string; size: string } | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [attachmentMenuId, setAttachmentMenuId] = useState<string | null>(null);
   const [focusToolsOpen, setFocusToolsOpen] = useState(false);
   const [focusTextId, setFocusTextId] = useState<string | null>(null);
   const [contextPoint, setContextPoint] = useState<Point | null>(null);
@@ -56,6 +79,12 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     document.addEventListener('pointerdown', close, true);
     return () => document.removeEventListener('pointerdown', close, true);
   }, [actionsOpen]);
+  useEffect(() => {
+    if (!attachmentMenuId) return;
+    const close = (event: PointerEvent) => { if (!(event.target as HTMLElement).closest('.attachment-menu')) setAttachmentMenuId(null); };
+    document.addEventListener('pointerdown', close, true);
+    return () => document.removeEventListener('pointerdown', close, true);
+  }, [attachmentMenuId]);
   const [viewportSize, setViewportSize] = useState({ width: 1000, height: 650 });
   const [localAssets, setLocalAssets] = useState(assets);
   const gesture = useRef<Gesture | null>(null);
@@ -126,11 +155,39 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   function setAppearance(id: string, appearance: TextAppearance) {
     commit(objectsRef.current.map((object) => object.id === id && object.type === 'text' ? { ...object, payload: { ...object.payload, appearance } } : object));
   }
-  function insertAsset(asset: Asset) {
+  async function setDocumentPresentation(id: string, presentation: 'block' | 'printout') {
+    const object = objectsRef.current.find((item) => item.id === id);
+    if (!object || object.type !== 'document') return;
+    const payload = object.payload as { assetId: string; format: string };
+    if (!['pdf', 'docx'].includes(payload.format)) return;
+    const width = presentation === 'printout' ? (payload.format === 'docx' ? 850 : 620) : 420;
+    let height = presentation === 'printout' ? 1050 : 320;
+    if (presentation === 'printout' && payload.format === 'pdf') height = await pdfPrintoutHeight(payload.assetId, width);
+    commit(objectsRef.current.map((item) => item.id === id ? { ...item, width, height, payload: { ...item.payload, presentation } } : item));
+    setActiveDoc(null);
+  }
+  function resizePrintout(id: string, size: { width: number; height: number }) {
+    if (![size.width, size.height].every(Number.isFinite) || size.width < 100 || size.width > 5000 || size.height < 100 || size.height > 100000) return;
+    const current = objectsRef.current.find((item) => item.id === id);
+    if (!current || (Math.abs(current.height - size.height) < 12 && Math.abs(current.width - size.width) < 12)) return;
+    updateObjects(objectsRef.current.map((item) => item.id === id ? { ...item, width: size.width, height: size.height } : item));
+  }
+  async function insertAsset(asset: Asset, presentation: 'block' | 'printout' = 'block', at?: Point) {
     const ext = asset.original_name.split('.').pop()?.toLowerCase() ?? '';
-    const isImage = ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext);
+    const isImage = asset.mime_type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext);
+    const isAudio = asset.mime_type.startsWith('audio/') || ['mp3','wav','m4a','ogg','oga','flac','aac','opus'].includes(ext);
+    const isVideo = asset.mime_type.startsWith('video/') || ['mp4','webm','mov','m4v','ogv','avi','mkv'].includes(ext);
+    const type: CanvasObject['type'] = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'document';
+    const printout = type === 'document' && ['pdf', 'docx'].includes(ext) && presentation === 'printout';
+    const objectWidth = printout ? (ext === 'docx' ? 850 : 620) : type === 'audio' ? 360 : 420;
+    let objectHeight = printout ? 1050 : type === 'audio' ? 88 : type === 'video' ? 270 : 320;
+    if (printout && ext === 'pdf') {
+      try { objectHeight = await pdfPrintoutHeight(asset.id, objectWidth); }
+      catch (error) { onError(error); }
+    }
     const center = centerWorld();
-    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: isImage ? 'image' : 'document', x: center.x - 210, y: center.y - 160, width: 420, height: 320, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext } };
+    const offset = (objectsRef.current.filter((item) => item.type !== 'ink').length % 6) * 28;
+    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block' } };
     setLocalAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
   }
@@ -251,12 +308,19 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }
   async function onDrop(event: React.DragEvent) {
     event.preventDefault();
-    for (const file of Array.from(event.dataTransfer.files)) {
+    const point = world(screen(event.nativeEvent));
+    const files = Array.from(event.dataTransfer.files);
+    const presentation = event.shiftKey ? 'printout' : 'block';
+    for (const [index, file] of files.entries()) {
       try {
         const asset = await window.whiteboard.importAsset(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
-        insertAsset(asset);
+        await insertAsset(asset, presentation, { x: point.x + index * 24, y: point.y + index * 24 });
         await onAssetImported(asset);
       } catch (error) { onError(error); }
+    }
+    if (!files.length) {
+      const text = event.dataTransfer.getData('text/plain').trim();
+      if (text && !nodes.some((node) => node.id === text)) createText(point.x, point.y, text);
     }
   }
 
@@ -264,7 +328,15 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   function ungroupSelected() { commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, group_id: null } : object)); }
   function zOrder(front: boolean) { const top = Math.max(0, ...objectsRef.current.map((item) => item.z_index)); const bottom = Math.min(0, ...objectsRef.current.map((item) => item.z_index)); commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, z_index: front ? top + 1 : bottom - 1 } : object)); }
   function deleteSelected() { commit(objectsRef.current.filter((object) => !selectedRef.current.includes(object.id))); updateSelected([]); }
-  function copySelected() { canvasClipboard = clone(objectsRef.current.filter((object) => selectedRef.current.includes(object.id))); }
+  function copySelected() {
+    canvasClipboard = clone(objectsRef.current.filter((object) => selectedRef.current.includes(object.id)));
+    if (!canvasClipboard.length) return;
+    const text = canvasClipboard.map((object) => object.type === 'text' ? plainTextOf((object.payload as { doc: unknown }).doc) : (object.payload as { name?: string }).name ?? '').filter(Boolean).join('\n').trim();
+    canvasClipboardText = text;
+    if (canvasClipboard.length === 1 && canvasClipboard[0].type === 'image') {
+      void window.whiteboard.copyImage((canvasClipboard[0].payload as { assetId: string }).assetId).catch((error) => { onError(error); return window.whiteboard.copyText(text); });
+    } else void window.whiteboard.copyText(text).catch(onError);
+  }
   function paste() {
     if (!canvasClipboard.length) return;
     const groups = new Map<string, string>();
@@ -288,8 +360,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       const key = event.key.toLowerCase();
       if (command && key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       else if (command && key === 'y') { event.preventDefault(); redo(); }
-      else if (command && key === 'c') { event.preventDefault(); copySelected(); }
-      else if (command && key === 'v') { event.preventDefault(); paste(); }
+      else if (command && key === 'c' && selectedRef.current.length) { event.preventDefault(); copySelected(); }
       else if (command && key === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelected() : groupSelected(); }
       else if (key === 'delete' || key === 'backspace') { if (selectedRef.current.length) { event.preventDefault(); deleteSelected(); } }
       else if (key === 'escape') { updateSelected([]); setActiveDoc(null); }
@@ -298,6 +369,36 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     window.addEventListener('keydown', keydown); window.addEventListener('keyup', keyup);
     return () => { window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup); };
   }, []);
+
+  useEffect(() => {
+    const pasteFromClipboard = (event: ClipboardEvent) => {
+      const clipboard = event.clipboardData;
+      if (!clipboard || (event.target as HTMLElement).closest('input, textarea, select')) return;
+      const files = Array.from(clipboard.items).filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter((file): file is File => Boolean(file));
+      if (files.length) {
+        event.preventDefault();
+        void (async () => {
+          for (const file of files) {
+            try {
+              const ext = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+              const name = file.name && file.name !== 'image.png' ? file.name : `Pasted ${file.type.startsWith('image/') ? 'image' : 'file'}.${ext}`;
+              const asset = await window.whiteboard.importAsset(name, file.type, new Uint8Array(await file.arrayBuffer()));
+              await insertAsset(asset);
+              await onAssetImported(asset);
+            } catch (error) { onError(error); }
+          }
+        })();
+        return;
+      }
+      if ((event.target as HTMLElement).closest('.ProseMirror')) return;
+      const text = clipboard.getData('text/plain');
+      if (text && text === canvasClipboardText && canvasClipboard.length) { event.preventDefault(); paste(); return; }
+      if (text) { event.preventDefault(); const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }
+      else if (canvasClipboard.length) { event.preventDefault(); paste(); }
+    };
+    document.addEventListener('paste', pasteFromClipboard);
+    return () => document.removeEventListener('paste', pasteFromClipboard);
+  }, [page.id, onAssetImported]);
 
   const margin = 250;
   const worldView = { minX: (-camera.x - margin) / camera.zoom, minY: (-camera.y - margin) / camera.zoom, maxX: (viewportSize.width - camera.x + margin) / camera.zoom, maxY: (viewportSize.height - camera.y + margin) / camera.zoom };
@@ -321,12 +422,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextPoint) setContextPoint(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if (!(event.target as HTMLElement).closest('.canvas-object')) setContextPoint(screen(event.nativeEvent)); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
-        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
-          {object.type !== 'ink' && object.type !== 'text' && <div className="object-header" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><span className="drag-grip">⋮⋮</span><span>{(object.payload as { name?: string }).name ?? object.type}</span>{(object.type === 'document' || object.type === 'extension') && <button type="button" title="Enter document" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}><Maximize2 size={12} /> {activeDoc === object.id ? 'Exit' : 'Interact'}</button>}</div>}
+        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
+          {object.type !== 'ink' && object.type !== 'text' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'document' || object.type === 'extension') && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
           {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} />}
-          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
+          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} />}
+          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
         </div>)}
@@ -401,6 +503,23 @@ function ImageBlock({ assetId }: { assetId: string }) {
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
   return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} /> : <div className="image-loading">Loading image…</div>;
+}
+
+function MediaBlock({ object, asset }: { object: CanvasObject; asset?: Asset }) {
+  const assetId = (object.payload as { assetId: string }).assetId;
+  const format = (object.payload as { format: string }).format;
+  const mediaMime: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4', ogv: 'video/ogg' };
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let live = true; let objectUrl = '';
+    window.whiteboard.readAsset(assetId).then((bytes) => {
+      objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: asset?.mime_type || mediaMime[format] || '' }));
+      if (live) setUrl(objectUrl);
+    }).catch(() => {});
+    return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [assetId, asset?.mime_type, format]);
+  if (!url) return <div className="image-loading">Loading media…</div>;
+  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => event.stopPropagation()}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => event.stopPropagation()} />;
 }
 
 function ExtensionObject({ object, extensions, interactive, onEnter, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {

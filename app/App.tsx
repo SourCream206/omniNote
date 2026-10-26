@@ -20,11 +20,13 @@ export default function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [paperOpen, setPaperOpen] = useState(false);
+  const [insertOpen, setInsertOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.min(380, Math.max(190, Number(localStorage.getItem('omninote.sidebarWidth')) || 230)));
   const [toast, setToast] = useState('');
   const canvasRef = useRef<CanvasHandle>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
+  const insertRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
     const data = await window.whiteboard.load();
@@ -53,9 +55,10 @@ export default function App() {
     const closeMenus = (event: PointerEvent) => {
       if (!exportRef.current?.contains(event.target as Node)) setExportOpen(false);
       if (!paperRef.current?.contains(event.target as Node)) setPaperOpen(false);
+      if (!insertRef.current?.contains(event.target as Node)) setInsertOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setExportOpen(false); setPaperOpen(false); }
+      if (event.key === 'Escape') { setExportOpen(false); setPaperOpen(false); setInsertOpen(false); }
     };
     document.addEventListener('pointerdown', closeMenus, true);
     document.addEventListener('keydown', closeOnEscape);
@@ -182,10 +185,11 @@ export default function App() {
     } catch (error) { notifyError(error); }
   }
 
-  async function insertFiles() {
+  async function insertFiles(presentation: 'block' | 'printout' = 'block') {
+    setInsertOpen(false);
     try {
       const assets = await window.whiteboard.pickAssets();
-      for (const asset of assets) { canvasRef.current?.insertAsset(asset); await importedAsset(asset); }
+      for (const asset of assets) { await canvasRef.current?.insertAsset(asset, presentation); await importedAsset(asset); }
     } catch (error) { notifyError(error); }
   }
 
@@ -265,7 +269,7 @@ export default function App() {
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
-        {page ? <><div className="page-topline"><div><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>{new Date(page.updated_at).toLocaleDateString()}</p></div><div className="page-actions"><div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div><button onClick={insertFiles}><Upload size={15} /> Insert file</button></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p></div>}
+        {page ? <><div className="page-topline"><div><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>{new Date(page.updated_at).toLocaleDateString()}</p></div><div className="page-actions"><div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div><div className="insert-control" ref={insertRef}><button aria-expanded={insertOpen} onClick={() => setInsertOpen((open) => !open)}><Upload size={15} /> Insert file <ChevronDown size={12} /></button>{insertOpen && <div className="insert-menu"><button onClick={() => insertFiles('block')}>As embedded block</button><button onClick={() => insertFiles('printout')}>As page printout <small>PDF or DOCX</small></button></div>}</div></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p></div>}
       </main>
     </div>
 

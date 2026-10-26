@@ -8,9 +8,9 @@ export interface InkPoint { x: number; y: number; pressure: number; tiltX: numbe
 export type ObjectPayload =
   | { doc: unknown; appearance?: { color: string | null; opacity: number } }
   | { points: InkPoint[]; color: string; width: number; highlighter: boolean }
-  | { assetId: string; name: string; format: string }
+  | { assetId: string; name: string; format: string; presentation?: 'block' | 'printout' }
   | { extensionId: string; objectType: string; data: unknown };
-export interface CanvasObject { id: string; page_id: string; type: 'text' | 'ink' | 'image' | 'document' | 'extension'; x: number; y: number; width: number; height: number; z_index: number; group_id: string | null; payload_version: number; payload: ObjectPayload }
+export interface CanvasObject { id: string; page_id: string; type: 'text' | 'ink' | 'image' | 'audio' | 'video' | 'document' | 'extension'; x: number; y: number; width: number; height: number; z_index: number; group_id: string | null; payload_version: number; payload: ObjectPayload }
 export interface Camera { x: number; y: number; zoom: number }
 export interface Snapshot { schemaVersion: number; directory: string; nodes: TreeNode[]; pages: PageRow[]; objects: CanvasObject[]; assets: Asset[] }
 export interface ExtensionManifest {
@@ -40,6 +40,8 @@ export interface WhiteboardBridge {
   importAsset(name: string, mimeType: string, bytes: Uint8Array): Promise<Asset>;
   pickAssets(): Promise<Asset[]>;
   readAsset(assetId: string): Promise<Uint8Array>;
+  copyImage(assetId: string): Promise<void>;
+  copyText(text: string): Promise<void>;
   openOriginal(assetId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   listExtensions(): Promise<ExtensionInfo[]>;
