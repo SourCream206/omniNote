@@ -6,7 +6,8 @@ import DOMPurify from 'dompurify';
 import JSZip from 'jszip';
 import { marked } from 'marked';
 import { ExternalLink, FileText, LoaderCircle } from 'lucide-react';
-import type { Asset, CanvasObject } from './types';
+import type { Asset, CanvasObject, ExtensionInfo } from './types';
+import ExtensionFrame from './ExtensionFrame';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -15,7 +16,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => (
 const frameCsp = "default-src 'none'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; script-src 'none'; connect-src 'none'; base-uri 'none'";
 const htmlDocument = (body: string, styles = '') => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${frameCsp}"><style>html,body{margin:0;padding:8px;font:13px/1.45 system-ui,sans-serif;color:#253454;background:white}a{color:#285fc0;text-decoration:underline}table{border-collapse:collapse}td,th{border:1px solid #dce3ee;padding:3px 6px}img{max-width:100%}</style>${styles}</head><body>${body}</body></html>`;
 
-export default function DocumentPreview({ object, asset, interactive, onEnter, onError }: { object: CanvasObject; asset?: Asset; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {
+export default function DocumentPreview({ object, asset, viewer, interactive, onEnter, onError }: { object: CanvasObject; asset?: Asset; viewer?: { extension: ExtensionInfo; entry: string }; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {
   const format = (object.payload as { format: string }).format;
   const assetId = (object.payload as { assetId: string }).assetId;
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -32,7 +33,7 @@ export default function DocumentPreview({ object, asset, interactive, onEnter, o
   }, [assetId]);
 
   useEffect(() => {
-    if (!bytes || format === 'pdf') return;
+    if (!bytes || format === 'pdf' || viewer) return;
     let live = true;
     const run = async () => {
       try {
@@ -49,7 +50,7 @@ export default function DocumentPreview({ object, asset, interactive, onEnter, o
     };
     run();
     return () => { live = false; };
-  }, [bytes, format]);
+  }, [bytes, format, viewer]);
 
   useEffect(() => {
     if (!interactive || !html || !iframe.current) return;
@@ -72,6 +73,7 @@ export default function DocumentPreview({ object, asset, interactive, onEnter, o
   }, [html, interactive, onError]);
 
   const openOriginal = () => window.whiteboard.openOriginal(assetId).catch(onError);
+  if (viewer) return <div className="document-body" onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}><div className="document-actions"><span className="format-tag">{format.toUpperCase()}</span><span className="document-name">{asset?.original_name ?? (object.payload as { name: string }).name}</span><button onPointerDown={(event) => event.stopPropagation()} onClick={openOriginal}><ExternalLink size={12} /> Open original</button></div><ExtensionFrame extension={viewer.extension} entry={viewer.entry} kind="document" data={{ name: asset?.original_name, format }} bytes={bytes} interactive={interactive} onEnter={onEnter} onError={onError} /></div>;
   return <div className="document-body" onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}>
     <div className="document-actions"><span className="format-tag">{format.toUpperCase() || 'FILE'}</span><span className="document-name">{asset?.original_name ?? (object.payload as { name: string }).name}</span><button onPointerDown={(event) => event.stopPropagation()} onClick={openOriginal}><ExternalLink size={12} /> Open original</button></div>
     <div className="document-content">

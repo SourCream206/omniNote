@@ -1,0 +1,23 @@
+{
+  "id": "omninote.contributions",
+  "name": "Contribution demo",
+  "version": "1.0.0",
+  "apiVersion": "1.0.0",
+  "main": "extension.js",
+  "activationEvents": ["onCommand:omninote.contributions.card", "onCommand:omninote.contributions.export", "onImport:txt"],
+  "permissions": ["canvas.write", "asset.read", "export.write", "link.open"],
+  "contributes": {
+    "commands": [
+      { "id": "omninote.contributions.card", "title": "Insert demo card" },
+      { "id": "omninote.contributions.import", "title": "Read imported text" },
+      { "id": "omninote.contributions.export", "title": "Export demo text" }
+    ],
+    "toolbar": [{ "command": "omninote.contributions.card", "label": "Demo card" }],
+    "sidebar": [{ "command": "omninote.contributions.card", "label": "Insert demo card" }],
+    "canvasObjectTypes": [{ "type": "demo.card", "entry": "card.html" }],
+    "documentViewers": [{ "extensions": ["omnidemo"], "entry": "viewer.html" }],
+    "importers": [{ "extensions": ["txt"], "command": "omninote.contributions.import" }],
+    "exporters": [{ "id": "demo text", "command": "omninote.contributions.export" }],
+    "settings": [{ "key": "label", "label": "Card label", "type": "string", "default": "Demo card" }]
+  }
+}

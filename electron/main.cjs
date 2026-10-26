@@ -25,6 +25,7 @@ function registerIpc() {
   handle('node:delete', (nodeId) => store.deleteNode(nodeId));
   handle('node:move', (nodeId, parentId, beforeId) => store.moveNode(nodeId, parentId, beforeId));
   handle('page:save', (pageId, objects, camera) => store.savePage(pageId, objects, camera));
+  handle('page:style', (pageId, style) => store.setPageStyle(pageId, style));
   handle('asset:import', (name, mimeType, bytes) => store.importAsset(name, mimeType, bytes));
   handle('asset:read', (assetId) => store.readAsset(assetId));
   handle('asset:pick', async () => {
@@ -44,7 +45,18 @@ function registerIpc() {
   });
   handle('extension:list', () => store.listExtensions());
   handle('extension:source', (extensionId) => store.extensionSource(extensionId));
-  handle('extension:enable', (extensionId, enabled) => store.setExtensionEnabled(extensionId, enabled));
+  handle('extension:resource', (extensionId, fileName) => store.extensionResource(extensionId, fileName));
+  handle('extension:enable', (extensionId, enabled, permissions) => store.setExtensionEnabled(extensionId, enabled, permissions));
+  handle('extension:setting', (extensionId, key, value) => store.setExtensionSetting(extensionId, key, value));
+  handle('export:save', async (name, bytes) => {
+    if (typeof name !== 'string' || !/^[\w.-]{1,120}$/.test(name)) throw new Error('Invalid export name');
+    const data = Buffer.from(bytes);
+    if (!data.length || data.length > 100 * 1024 * 1024) throw new Error('Invalid export size');
+    const result = await dialog.showSaveDialog(window, { title: 'Save extension export', defaultPath: name });
+    if (result.canceled || !result.filePath) return false;
+    fs.writeFileSync(result.filePath, data);
+    return true;
+  });
   handle('workspace:export', async () => {
     const result = await dialog.showSaveDialog(window, { title: 'Export notebook workspace', defaultPath: 'omninote-backup.zip', filters: [{ name: 'ZIP archive', extensions: ['zip'] }] });
     if (result.canceled || !result.filePath) return false;
@@ -66,6 +78,10 @@ app.whenReady().then(() => {
   const exampleSource = path.join(projectRoot, 'examples', 'date-insert');
   const exampleDestination = path.join(store.extensionDir, 'whiteboard.date-insert');
   if (!fs.existsSync(exampleDestination)) fs.cpSync(exampleSource, exampleDestination, { recursive: true });
+  const exampleState = store.db.prepare('SELECT value_json FROM extension_settings WHERE extension_id=? AND key=?').get('whiteboard.date-insert', 'enabled');
+  if (!exampleState && fs.existsSync(path.join(exampleDestination, 'extension.js')) && fs.readFileSync(path.join(exampleSource, 'extension.js')).equals(fs.readFileSync(path.join(exampleDestination, 'extension.js')))) {
+    store.setExtensionEnabled('whiteboard.date-insert', true, ['canvas.write']);
+  }
 
   protocol.handle('whiteboard', (request) => {
     const url = new URL(request.url);
@@ -83,7 +99,7 @@ app.whenReady().then(() => {
 
   window = new BrowserWindow({
     width: 1500, height: 930, minWidth: 1000, minHeight: 680,
-    backgroundColor: '#f6f7fb', title: 'omniNote',
+    backgroundColor: '#f7f7f8', title: 'omniNote', autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,

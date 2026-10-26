@@ -1,0 +1,3 @@
+<style>body{padding:12px;color:#263552}pre{white-space:pre-wrap}a{color:#315eb8}</style>
+<strong>Demo document viewer</strong><pre id="content">Loading…</pre><a href="https://example.com" id="link">Open example.com</a>
+<script>window.addEventListener('message',event=>{if(event.data?.type==='omninote:init')document.getElementById('content').textContent=new TextDecoder().decode(event.data.bytes??new Uint8Array())});document.getElementById('link').addEventListener('click',event=>{event.preventDefault();parent.postMessage({type:'omninote:openExternal',url:event.currentTarget.href},'*')})</script>

@@ -14,7 +14,7 @@ The final canvas uses a positioned DOM layer for rich text and document frames, 
 
 Reserve an `object_text` indexing projection for SQLite FTS5, including extracted PDF/DOCX text in a later search milestone. It remains derived data, so it can be rebuilt without touching originals. Preserve source page/object IDs in search rows for navigation.
 
-Use SQLite transactions, WAL, schema version 1, forward-only migrations, and consistent backups. Import an asset to a temporary path, verify its hash, atomically rename it into `assets/`, then commit its metadata. Keep previews as disposable caches; never replace an original with a rendered derivative.
+Use SQLite transactions, WAL, forward-only migrations (current schema version 2), and consistent backups. Import an asset to a temporary path, calculate its hash, atomically rename it into `assets/`, then commit its metadata. Keep previews as disposable caches; never replace an original with a rendered derivative.
 
 Add notebook export as a ZIP containing SQLite data, original assets, and a format manifest. Add page-to-PDF export as a separate read-only render path. Export and restore need a round-trip test once persistence and documents exist; these are planned alongside backups, not silently substituted for backup.
 
@@ -33,7 +33,7 @@ The manifest declares `id`, `name`, `version`, `apiVersion`, `activationEvents`,
 | Milestone | Runnable result | Gate |
 | --- | --- | --- |
 | M0 | Electron input lab with pen, pressure, tilt, palm filter, eraser, event modes, and timing telemetry | Test on target stylus hardware; decide renderer/input strategy. |
-| M1 | App shell, nested notebook tree, section page list, SQLite persistence and migration | Reopen and verify hierarchy, order, and timestamps. |
+| M1 | App shell, nested notebook tree with pages under sections, SQLite persistence and migration | Reopen and verify hierarchy, order, and timestamps. |
 | M2 | Infinite canvas, rich text, object selection/grouping/z-order, clipboard, undo/redo | Pan/zoom and text at high zoom; benchmark hundreds of objects. |
 | M3 | Vector ink, pen/highlighter, stroke and partial eraser, lasso | Pressure, palm, pen-button and reopen tests. |
 | M4 | Embedded PDF and DOCX with verified links; honest previews for other formats; originals | PDF and DOCX external/internal-link fixtures, original-byte verification, frame-edge ink. |

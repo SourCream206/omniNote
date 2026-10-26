@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, FilePlus2, FolderPlus, Layers3, MoreHorizontal, NotebookPen, PanelLeftClose, Plus, Search, Settings2, Upload, X, Download, FileText, Puzzle, CalendarDays } from 'lucide-react';
-import type { CanvasObject, Camera, ExtensionInfo, NodeKind, Snapshot, TreeNode } from './types';
+import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, CalendarDays, Grid2X2, Check } from 'lucide-react';
+import type { Asset, CanvasObject, Camera, ExtensionInfo, NodeKind, PaperStyle, Snapshot, TreeNode } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
+const paperChoices: { style: PaperStyle; label: string }[] = [{ style: 'blank', label: 'Blank' }, { style: 'dots', label: 'Dots' }, { style: 'grid', label: 'Grid' }, { style: 'lines', label: 'Lines' }];
 
 export default function App() {
   const [dialogRequest, setDialogRequest] = useState<{ title: string; message?: string; mode: 'text' | 'confirm'; action: string } | null>(null);
@@ -17,6 +18,9 @@ export default function App() {
   const [showExtensions, setShowExtensions] = useState(false);
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [paperOpen, setPaperOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => Math.min(380, Math.max(190, Number(localStorage.getItem('omninote.sidebarWidth')) || 230)));
   const [toast, setToast] = useState('');
   const canvasRef = useRef<CanvasHandle>(null);
 
@@ -31,7 +35,7 @@ export default function App() {
     Promise.all([refresh(), refreshExtensions()]).then(([data]) => {
       const first = data.nodes.find((node) => node.kind === 'page');
       if (first) { setPageId(first.id); setSectionId(first.parent_id); }
-      setExpanded(new Set(data.nodes.filter((node) => node.kind === 'notebook' || node.kind === 'folder').map((node) => node.id)));
+      setExpanded(new Set(data.nodes.filter((node) => node.kind !== 'page').map((node) => node.id)));
     }).catch((error) => setToast(String(error)));
   }, [refresh, refreshExtensions]);
 
@@ -41,6 +45,19 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => { localStorage.setItem('omninote.sidebarWidth', String(sidebarWidth)); }, [sidebarWidth]);
+
+  function resizeSidebar(event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (move: PointerEvent) => setSidebarWidth(Math.min(380, Math.max(190, startWidth + move.clientX - startX)));
+    const onEnd = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onEnd); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd, { once: true });
+  }
+
+
   const nodes = snapshot?.nodes ?? [];
   const page = nodes.find((node) => node.id === pageId && node.kind === 'page') ?? null;
   const section = nodes.find((node) => node.id === sectionId && node.kind === 'section') ?? null;
@@ -49,7 +66,6 @@ export default function App() {
     while (current?.parent_id) current = nodes.find((node) => node.id === current?.parent_id) ?? null;
     return current?.kind === 'notebook' ? current : nodes.find((node) => node.kind === 'notebook');
   }, [nodes, section]);
-  const pages = section ? childrenOf(nodes, section.id).filter((node) => node.kind === 'page') : [];
 
   const notifyError = (error: unknown) => setToast(error instanceof Error ? error.message : String(error));
 
@@ -121,76 +137,134 @@ export default function App() {
     } : previous);
   }
 
-  async function insertFiles() {
+  async function changePaper(style: PaperStyle) {
+    if (!pageId) return;
+    setPaperOpen(false);
     try {
-      const assets = await window.whiteboard.pickAssets();
-      for (const asset of assets) canvasRef.current?.insertAsset(asset);
+      await window.whiteboard.setPageStyle(pageId, style);
+      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === pageId ? { ...row, paper_style: style } : row) } : previous);
     } catch (error) { notifyError(error); }
   }
 
-  async function runExtension(commandId: string) {
+  async function insertFiles() {
+    try {
+      const assets = await window.whiteboard.pickAssets();
+      for (const asset of assets) { canvasRef.current?.insertAsset(asset); await importedAsset(asset); }
+    } catch (error) { notifyError(error); }
+  }
+
+  async function importedAsset(asset: Asset) {
+    await refresh();
+    const extension = asset.original_name.split('.').pop()?.toLowerCase() ?? '';
+    for (const item of extensions.filter((entry) => entry.enabled && entry.grantedPermissions.includes('asset.read'))) {
+      for (const importer of item.manifest.contributes.importers ?? []) {
+        if (importer.extensions.includes(extension)) await runExtension(importer.command, { asset: { id: asset.id, name: asset.original_name, mimeType: asset.mime_type }, bytes: await window.whiteboard.readAsset(asset.id) });
+      }
+    }
+  }
+
+  async function runExtension(commandId: string, context?: unknown): Promise<boolean> {
     const extension = extensions.find((item) => item.enabled && item.manifest.contributes.commands?.some((command) => command.id === commandId));
-    if (!extension) return;
+    if (!extension) return false;
     try {
       const source = await window.whiteboard.extensionSource(extension.manifest.id);
       const blobUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
       const worker = new Worker(blobUrl);
       const requestId = crypto.randomUUID();
-      const timer = setTimeout(() => { worker.terminate(); URL.revokeObjectURL(blobUrl); notifyError('Extension timed out'); }, 5000);
-      worker.onmessage = (event: MessageEvent) => {
-        if (event.data?.requestId !== requestId) return;
-        clearTimeout(timer);
-        if (event.data.type === 'canvas.insertText' && extension.manifest.permissions.includes('canvas.write') && typeof event.data.text === 'string') {
-          canvasRef.current?.insertText(event.data.text.slice(0, 10000));
-          setToast(`${extension.manifest.name} ran`);
-        }
-        worker.terminate(); URL.revokeObjectURL(blobUrl);
-      };
-      worker.onerror = (error) => { clearTimeout(timer); worker.terminate(); URL.revokeObjectURL(blobUrl); notifyError(error.message); };
-      worker.postMessage({ type: 'invoke', command: commandId, requestId, apiVersion: '1.0.0' });
+      return await new Promise<boolean>((resolve) => {
+        const finish = (success: boolean) => { clearTimeout(timer); worker.terminate(); URL.revokeObjectURL(blobUrl); resolve(success); };
+        const timer = setTimeout(() => { notifyError('Extension timed out'); finish(false); }, 5000);
+        worker.onmessage = async (event: MessageEvent) => {
+          const message = event.data;
+          if (message?.requestId !== requestId) return;
+          try {
+            if (message.type === 'canvas.insertText' && extension.grantedPermissions.includes('canvas.write') && typeof message.text === 'string') canvasRef.current?.insertText(message.text.slice(0, 10000));
+            else if (message.type === 'canvas.insertObject' && extension.grantedPermissions.includes('canvas.write') && extension.manifest.contributes.canvasObjectTypes?.some((entry) => entry.type === message.objectType)) canvasRef.current?.insertExtensionObject(extension.manifest.id, message.objectType, message.data);
+            else if (message.type === 'export.writeFile' && extension.grantedPermissions.includes('export.write') && typeof message.name === 'string') await window.whiteboard.saveExtensionExport(message.name, new Uint8Array(message.bytes));
+            else throw new Error('Extension requested an undeclared capability');
+            setToast(`${extension.manifest.name} ran`);
+            finish(true);
+          } catch (error) { notifyError(error); finish(false); }
+        };
+        worker.onerror = (error) => { notifyError(error.message); finish(false); };
+        worker.postMessage({ type: 'invoke', command: commandId, requestId, apiVersion: '1.0.0', settings: extension.settings, context });
+      });
+    } catch (error) { notifyError(error); return false; }
+  }
+
+  async function toggleExtension(item: ExtensionInfo, enabled: boolean) {
+    try {
+      if (enabled && item.manifest.permissions.length) {
+        const approved = await ask(`Enable ${item.manifest.name}`, '', 'Enable', 'confirm', `Grant: ${item.manifest.permissions.join(', ')}?`);
+        if (!approved) return;
+      }
+      await window.whiteboard.enableExtension(item.manifest.id, enabled, enabled ? item.manifest.permissions : []);
+      await refreshExtensions();
     } catch (error) { notifyError(error); }
   }
 
-  if (!snapshot) return <div className="loading-screen"><NotebookPen size={38} /><strong>Opening your workspace…</strong></div>;
+  if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
+  const paperStyle = snapshot.pages.find((row) => row.id === pageId)?.paper_style ?? 'blank';
 
   return <div className="app-shell">
     <header className="app-header">
-      <div className="brand"><span className="brand-icon"><NotebookPen size={19} strokeWidth={2.2} /></span><span><strong>omniNote</strong><small>your ideas, anywhere</small></span></div>
+      <div className="brand"><strong>omniNote</strong></div>
       <div className="header-divider" />
-      <button className="icon-button header-toggle" title="Toggle sidebar" onClick={() => setSidebarVisible(!sidebarVisible)}><PanelLeftClose size={17} /></button>
-      <div className="breadcrumbs"><span>{notebook?.title ?? 'Workspace'}</span><ChevronRight size={13} /><span>{section?.title ?? 'Select a section'}</span><ChevronRight size={13} /><strong>{page?.title ?? 'Select a page'}</strong></div>
-      <div className="header-actions"><span className="save-status"><span className="saved-dot" /> Stored locally</span><button className="header-button" onClick={() => window.whiteboard.exportWorkspace().catch(notifyError)}><Download size={15} /> Backup ZIP</button><button className="icon-button" title="Extensions" onClick={() => setShowExtensions(true)}><Puzzle size={18} /></button></div>
+      <div className="breadcrumbs"><span>{notebook?.title ?? 'Workspace'}</span><ChevronRight size={13} /><span>{section?.title ?? 'Select a section'}</span></div>
+      <div className="header-actions"><div className="export-control" onKeyDown={(event) => { if (event.key === 'Escape') setExportOpen(false); }}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <><button className="export-dismiss" aria-label="Close export menu" onClick={() => setExportOpen(false)} /><div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Page as PDF</button><button onClick={() => { setExportOpen(false); window.whiteboard.exportWorkspace().catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div></>}</div></div>
     </header>
 
     <div className="app-body">
-      {sidebarVisible && <aside className="notebook-sidebar">
-        <div className="sidebar-title"><span>NOTEBOOKS</span><button className="icon-button small" title="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
-        <div className="tree-scroll">
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} onSelect={(selected) => { if (selected.kind === 'section') { setSectionId(selected.id); setPageId(firstPageIn(nodes, selected.id)); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
+      <nav className="activity-rail" aria-label="Primary navigation"><button className={sidebarVisible ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={sidebarVisible} onClick={() => setSidebarVisible((visible) => !visible)}><BookOpen size={20} /></button><button title="Extensions" aria-label="Extensions" aria-pressed={showExtensions} onClick={() => setShowExtensions(true)}><Puzzle size={20} /></button></nav>
+      {sidebarVisible && <aside className="notebook-sidebar" aria-label="Explorer" style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
+        <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
+        <div className="tree-scroll" role="tree" aria-label="Notebooks">
+          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={pageId} onSelect={(selected) => { if (selected.kind === 'section') { setSectionId(selected.id); setPageId(firstPageIn(nodes, selected.id)); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') { setPageId(selected.id); setSectionId(selected.parent_id); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
-        <div className="sidebar-footer"><button onClick={() => setShowExtensions(true)}><Puzzle size={16} /> Extensions <span>{extensions.filter((item) => item.enabled).length}</span></button><button onClick={() => window.whiteboard.exportWorkspace().catch(notifyError)}><Download size={16} /> Export workspace</button></div>
+        <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
+        {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
+        <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
-
-      <aside className="page-sidebar"><div className="page-sidebar-head"><div><span className="eyebrow">SECTION</span><h2>{section?.title ?? 'Pages'}</h2></div><button className="icon-button" title="New page" disabled={!section} onClick={() => section && createNode('page', section.id)}><FilePlus2 size={18} /></button></div><div className="page-search"><Search size={14} /><span>Pages in this section</span></div><div className="page-list">{pages.map((item) => <div key={item.id} className={`page-item ${pageId === item.id ? 'active' : ''}`} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', item.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const moving = event.dataTransfer.getData('text/plain'); if (moving) moveNode(moving, sectionId, item.id); }} onClick={() => setPageId(item.id)} onDoubleClick={() => renameNode(item)}><FileText size={16} /><div><strong>{item.title}</strong><small>{new Date(item.updated_at).toLocaleDateString()}</small></div><button className="page-delete" title="Delete page" onClick={(event) => { event.stopPropagation(); deleteNode(item); }}><X size={13} /></button></div>)}{section && !pages.length && <div className="empty-pages">No pages yet.<button onClick={() => createNode('page', section.id)}>Create a page</button></div>}</div><button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button></aside>
-
       <main className="editor-area">
-        {page ? <><div className="page-topline"><div><span className="eyebrow">PAGE</span><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>Created {new Date(page.created_at).toLocaleString()} · Updated {new Date(page.updated_at).toLocaleString()}</p></div><div className="page-actions"><button onClick={insertFiles}><Upload size={15} /> Insert file</button><button onClick={() => window.whiteboard.exportPagePdf().catch(notifyError)}><Download size={15} /> PDF</button></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={refresh} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p>{section && <button onClick={() => createNode('page', section.id)}>Create page</button>}</div>}
+        {page ? <><div className="page-topline"><div><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>{new Date(page.updated_at).toLocaleDateString()}</p></div><div className="page-actions"><div className="paper-control" onKeyDown={(event) => { if (event.key === 'Escape') setPaperOpen(false); }}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <><button className="paper-dismiss" aria-label="Close paper menu" onClick={() => setPaperOpen(false)} /><div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div></>}</div><button onClick={insertFiles}><Upload size={15} /> Insert file</button></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p></div>}
       </main>
     </div>
 
-    {showExtensions && <div className="modal-backdrop" onClick={() => setShowExtensions(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">LOCAL EXTENSIONS</span><h2>Extensions</h2></div><button className="icon-button" onClick={() => setShowExtensions(false)}><X size={18} /></button></div><p>Extensions load from <code>{snapshot.directory}\extensions</code>. Commands run in isolated browser workers.</p>{extensions.map((item) => <div className="extension-row" key={item.manifest.id}><span className="extension-symbol"><Puzzle size={19} /></span><div><strong>{item.manifest.name}</strong><small>{item.manifest.id} · v{item.manifest.version}</small></div><label className="mini-toggle"><input type="checkbox" checked={item.enabled} onChange={async (event) => { await window.whiteboard.enableExtension(item.manifest.id, event.target.checked); await refreshExtensions(); }} /><span /></label></div>)}<div className="extension-tip"><CalendarDays size={16} /><span>The bundled example adds an <strong>Insert date</strong> toolbar command.</span></div></div></div>}
+    {showExtensions && <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onClose={() => setShowExtensions(false)} onToggle={toggleExtension} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} />}
     {dialogRequest && <div className="modal-backdrop" onClick={() => finishDialog(null)}><form className="modal input-dialog" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); finishDialog(dialogRequest.mode === 'confirm' ? 'yes' : dialogValue.trim()); }} onKeyDown={(event) => { if (event.key === 'Escape') finishDialog(null); }}><div className="modal-head"><h2>{dialogRequest.title}</h2><button className="icon-button" type="button" onClick={() => finishDialog(null)}><X size={18} /></button></div>{dialogRequest.message && <p>{dialogRequest.message}</p>}{dialogRequest.mode === 'text' && <input autoFocus aria-label={dialogRequest.title} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} maxLength={200} required />}<div className="dialog-actions"><button type="button" onClick={() => finishDialog(null)}>Cancel</button><button type="submit" className={dialogRequest.action === 'Delete' ? 'danger' : 'primary'}>{dialogRequest.action}</button></div></form></div>}
     {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast('')}><X size={13} /></button></div>}
   </div>;
 }
 
-interface TreeProps { node: TreeNode; nodes: TreeNode[]; depth: number; expanded: Set<string>; selectedSectionId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void }
+function ExtensionsPanel({ directory, extensions, onClose, onToggle, onSetting }: { directory: string; extensions: ExtensionInfo[]; onClose(): void; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void }) {
+  return <div className="modal-backdrop" onClick={onClose}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">LOCAL EXTENSIONS</span><h2>Extensions</h2></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div><p>Extensions load from <code>{directory}\extensions</code>. Commands run in isolated workers; visual contributions run in sandboxed frames.</p>{extensions.map((item) => <div key={item.manifest.id}><div className="extension-row"><span className="extension-symbol"><Puzzle size={19} /></span><div><strong>{item.manifest.name}</strong><small>{item.manifest.id} · v{item.manifest.version}</small><small>Permissions: {item.manifest.permissions.join(', ') || 'none'}</small></div><label className="mini-toggle"><input type="checkbox" checked={item.enabled} onChange={(event) => onToggle(item, event.target.checked)} /><span /></label></div>{item.enabled && !!item.manifest.contributes.settings?.length && <div className="extension-settings">{item.manifest.contributes.settings?.map((setting) => <label key={setting.key}>{setting.label}{setting.type === 'boolean' ? <input type="checkbox" checked={Boolean(item.settings[setting.key])} onChange={(event) => onSetting(item.manifest.id, setting.key, event.target.checked)} /> : <input type="text" key={`${item.manifest.id}:${setting.key}`} defaultValue={String(item.settings[setting.key] ?? '')} onBlur={(event) => onSetting(item.manifest.id, setting.key, event.target.value)} />}</label>)}</div>}</div>)}<div className="extension-tip"><CalendarDays size={16} /><span>The bundled example adds an <strong>Insert date</strong> toolbar command.</span></div></div></div>;
+}
+
+interface TreeProps { node: TreeNode; nodes: TreeNode[]; depth: number; expanded: Set<string>; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void }
 function TreeItem(props: TreeProps) {
-  const { node, nodes, depth, expanded, selectedSectionId, onToggle, onSelect, onCreate, onRename, onDelete, onMove } = props;
-  const children = childrenOf(nodes, node.id).filter((item) => item.kind !== 'page');
-  const expandable = node.kind === 'notebook' || node.kind === 'folder';
+  const { node, nodes, depth, expanded, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove } = props;
+  const children = childrenOf(nodes, node.id);
+  const expandable = node.kind !== 'page';
   const [menu, setMenu] = useState(false);
   const [drop, setDrop] = useState(false);
-  return <><div className={`tree-item ${selectedSectionId === node.id ? 'active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 11 + depth * 15 }} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(false); const moving = event.dataTransfer.getData('text/plain'); if (moving && moving !== node.id) onMove(moving, expandable ? node.id : node.parent_id, expandable ? null : node.id); }} onClick={() => { if (expandable) onToggle(node.id); else onSelect(node); }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}><span className="tree-chevron">{expandable ? (expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}</span><span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : <Layers3 size={15} />}</span><span className="tree-name">{node.title}</span><button className="tree-more" title="Item actions" onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>{menu && <div className="tree-menu" onClick={(event) => event.stopPropagation()}>{expandable && <><button onClick={() => { onCreate('folder', node.id); setMenu(false); }}>New folder</button><button onClick={() => { onCreate('section', node.id); setMenu(false); }}>New section</button></>}{node.kind === 'section' && <button onClick={() => { onCreate('page', node.id); setMenu(false); }}>New page</button>}<button onClick={() => { onRename(node); setMenu(false); }}>Rename</button><button className="danger" onClick={() => { onDelete(node); setMenu(false); }}>Delete</button></div>}</div>{expandable && expanded.has(node.id) && children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</>;
+  const activate = () => node.kind === 'notebook' || node.kind === 'folder' ? onToggle(node.id) : onSelect(node);
+  const onDrop = (event: React.DragEvent) => {
+    event.preventDefault(); event.stopPropagation(); setDrop(false);
+    const movingId = event.dataTransfer.getData('text/plain');
+    const moving = nodes.find((item) => item.id === movingId);
+    if (!moving || movingId === node.id) return;
+    if ((node.kind === 'section' && moving.kind !== 'page') || (node.kind === 'notebook' && moving.kind === 'notebook')) onMove(movingId, node.parent_id, node.id);
+    else onMove(movingId, expandable ? node.id : node.parent_id, expandable ? null : node.id);
+  };
+  return <>
+    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
+      {expandable ? <button className="tree-chevron" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.title}`} onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}>{expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-chevron" />}
+      <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : node.kind === 'section' ? <Layers3 size={15} /> : <FileText size={15} />}</span>
+      <span className="tree-name" title={node.title}>{node.title}</span>
+      <button className="tree-more" title={`${node.kind} actions`} aria-label={`${node.kind} actions for ${node.title}`} onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>
+      {menu && <div className="tree-menu" onClick={(event) => event.stopPropagation()}>{(node.kind === 'notebook' || node.kind === 'folder') && <><button onClick={() => { onCreate('folder', node.id); setMenu(false); }}>New folder</button><button onClick={() => { onCreate('section', node.id); setMenu(false); }}>New section</button></>}{node.kind === 'section' && <button onClick={() => { onCreate('page', node.id); setMenu(false); }}>New page</button>}<button onClick={() => { onRename(node); setMenu(false); }}>Rename</button><button className="danger" onClick={() => { onDelete(node); setMenu(false); }}>Delete</button></div>}
+    </div>
+    {expandable && expanded.has(node.id) && <div role="group">{children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</div>}
+  </>;
 }

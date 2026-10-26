@@ -5,13 +5,14 @@ import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { Bold, Italic, Underline as UnderlineIcon, Heading1, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, FileUp, Maximize2, ChevronDown } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, Heading1, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, FileUp, Maximize2, ChevronDown, MoreHorizontal, Type } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
+import ExtensionFrame from './ExtensionFrame';
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset): void }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(): void; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset): void; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
@@ -21,6 +22,7 @@ let canvasClipboard: CanvasObject[] = [];
 
 const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<CanvasTool>('select');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
@@ -31,6 +33,14 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [width, setWidth] = useState(4);
   const [color, setColor] = useState('#253454');
   const [partialEraser, setPartialEraser] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(true);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const close = (event: PointerEvent) => { if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [actionsOpen]);
   const [viewportSize, setViewportSize] = useState({ width: 1000, height: 650 });
   const [localAssets, setLocalAssets] = useState(assets);
   const gesture = useRef<Gesture | null>(null);
@@ -105,7 +115,12 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     setLocalAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
   }
-  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset }), [page.id]);
+  function insertExtensionObject(extensionId: string, objectType: string, data: unknown) {
+    const center = centerWorld();
+    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'extension', x: center.x - 180, y: center.y - 120, width: 360, height: 240, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { extensionId, objectType, data } };
+    commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
+  }
+  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject }), [page.id]);
 
   function screen(event: { clientX: number; clientY: number }): Point { const rect = viewport.current!.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
   function world(point: Point, cam = cameraRef.current): Point { return { x: (point.x - cam.x) / cam.zoom, y: (point.y - cam.y) / cam.zoom }; }
@@ -221,9 +236,9 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       try {
         const asset = await window.whiteboard.importAsset(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
         insertAsset(asset);
+        await onAssetImported(asset);
       } catch (error) { onError(error); }
     }
-    onAssetImported();
   }
 
   function groupSelected() { if (selectedRef.current.length < 2) return; const groupId = crypto.randomUUID(); commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, group_id: groupId } : object)); }
@@ -270,6 +285,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const visibleObjects = useMemo(() => objects.filter((object) => object.x + object.width >= worldView.minX && object.y + object.height >= worldView.minY && object.x <= worldView.maxX && object.y <= worldView.maxY).sort((a, b) => a.z_index - b.z_index), [objects, worldView.minX, worldView.minY, worldView.maxX, worldView.maxY]);
   const worldStyle = { transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` };
   const selectedObject = objects.find((object) => selected.includes(object.id));
+  const viewerFor = (format: string) => extensions.filter((item) => item.enabled && item.grantedPermissions.includes('asset.read')).flatMap((extension) => (extension.manifest.contributes.documentViewers ?? []).filter((entry) => entry.extensions.includes(format)).map((entry) => ({ extension, entry: entry.entry })))[0];
 
   return <div className="canvas-shell">
     <div className="canvas-toolbar">
@@ -279,33 +295,31 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       <div className="toolbar-divider" />
       <div className="tool-group"><label className="color-control" title="Ink color"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label><input className="width-slider" aria-label="Pen width" type="range" min="1" max="24" value={width} onChange={(event) => setWidth(Number(event.target.value))} /><span className="width-value">{width}px</span>{tool === 'eraser' && <label className="partial-toggle"><input type="checkbox" checked={partialEraser} onChange={(event) => setPartialEraser(event.target.checked)} /> Partial</label>}</div>
       <div className="toolbar-spacer" />
-      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button><button title="Copy selected" onClick={copySelected}><Copy size={16} /></button><button title="Group selected" onClick={groupSelected}><Group size={16} /></button><button title="Ungroup" onClick={ungroupSelected}><Ungroup size={16} /></button><button title="Bring to front" onClick={() => zOrder(true)}><BringToFront size={16} /></button><button title="Send to back" onClick={() => zOrder(false)}><SendToBack size={16} /></button><button title="Delete selected" onClick={deleteSelected}><Trash2 size={16} /></button></div>
+      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<div className="object-actions" ref={actionsRef} onKeyDown={(event) => { if (event.key === 'Escape') setActionsOpen(false); }}><button title="More object actions" aria-label="More object actions" aria-expanded={actionsOpen} onClick={() => setActionsOpen((open) => !open)}><MoreHorizontal size={17} /></button>{actionsOpen && <div className="object-actions-menu"><button disabled={!selected.length} onClick={() => { copySelected(); setActionsOpen(false); }}><Copy size={15} /> Copy</button><button disabled={selected.length < 2} onClick={() => { groupSelected(); setActionsOpen(false); }}><Group size={15} /> Group</button><button disabled={!selected.length} onClick={() => { ungroupSelected(); setActionsOpen(false); }}><Ungroup size={15} /> Ungroup</button><button disabled={!selected.length} onClick={() => { zOrder(true); setActionsOpen(false); }}><BringToFront size={15} /> Bring to front</button><button disabled={!selected.length} onClick={() => { zOrder(false); setActionsOpen(false); }}><SendToBack size={15} /> Send to back</button><button disabled={!selected.length} onClick={() => { deleteSelected(); setActionsOpen(false); }}><Trash2 size={15} /> Delete</button></div>}</div></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>
-    <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} />
-    <div ref={viewport} className="canvas-viewport" data-tool={tool} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => event.preventDefault()} style={{ backgroundPosition: `${camera.x}px ${camera.y}px`, backgroundSize: `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
+    {selectedObject?.type === 'text' && formatOpen && <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} />}
+    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => event.preventDefault()} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: object.z_index }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
-          {object.type !== 'ink' && <div className="object-header" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><span className="drag-grip">⋮⋮</span><span>{object.type === 'text' ? 'Note' : (object.payload as { name?: string }).name ?? object.type}</span>{object.type === 'document' && <button type="button" title="Enter document" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}><Maximize2 size={12} /> {activeDoc === object.id ? 'Exit' : 'Interact'}</button>}</div>}
+          {object.type !== 'ink' && <div className="object-header" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><span className="drag-grip">⋮⋮</span><span>{object.type === 'text' ? 'Note' : (object.payload as { name?: string }).name ?? object.type}</span>{(object.type === 'document' || object.type === 'extension') && <button type="button" title="Enter document" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}><Maximize2 size={12} /> {activeDoc === object.id ? 'Exit' : 'Interact'}</button>}</div>}
           {object.type === 'text' && <TextBlock object={object} onChange={(doc) => updateText(object.id, doc)} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => updateSelected([object.id])} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} />}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} />}
-          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
-          {object.type === 'extension' && <div className="extension-placeholder">Extension object: {(object.payload as { objectType: string }).objectType}</div>}
+          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
+          {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
         </div>)}
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
         {lasso.length > 1 && <svg className="lasso-overlay" overflow="visible"><polyline points={lasso.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#4471d0" strokeWidth={2 / camera.zoom} strokeDasharray="5 4" /></svg>}
       </div>
-      {!objects.length && <div className="canvas-empty"><PenLine size={30} /><strong>Your canvas starts anywhere</strong><span>Choose Text and click to type, or choose a pen to draw.</span></div>}
       <div className="canvas-zoom"><button onClick={() => zoomAt(0.8, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Minus size={15} /></button><span>{Math.round(camera.zoom * 100)}%</span><button onClick={() => zoomAt(1.25, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Plus size={15} /></button><button title="Reset view" onClick={() => updateCamera({ x: 0, y: 0, zoom: 1 })}><Maximize2 size={15} /></button></div>
     </div>
-    <div className="canvas-status"><span>{objects.length} objects · {visibleObjects.length} visible</span><span>Wheel to zoom · Space to pan · Shift-click to multi-select</span><span>{camera.zoom.toFixed(2)}×</span></div>
   </div>;
 });
 export default Canvas;
 
-function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
+function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} aria-pressed={active === tool} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
 
 function RichToolbar({ selectedObject, onAction, onRequestLink, nodes }: { selectedObject?: CanvasObject; onAction(action: string): void; onRequestLink(): Promise<string | null>; nodes: TreeNode[] }) {
   const active = selectedObject?.type === 'text';
@@ -355,4 +369,12 @@ function ImageBlock({ assetId }: { assetId: string }) {
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
   return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} /> : <div className="image-loading">Loading image…</div>;
+}
+
+function ExtensionObject({ object, extensions, interactive, onEnter, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {
+  const payload = object.payload as { extensionId: string; objectType: string; data: unknown };
+  const extension = extensions.find((item) => item.enabled && item.manifest.id === payload.extensionId);
+  const entry = extension?.manifest.contributes.canvasObjectTypes?.find((item) => item.type === payload.objectType)?.entry;
+  if (!extension || !entry) return <div className="extension-placeholder">Extension object unavailable: {payload.objectType}</div>;
+  return <ExtensionFrame extension={extension} entry={entry} kind="canvas-object" data={payload.data} interactive={interactive} onEnter={onEnter} onError={onError} />;
 }
