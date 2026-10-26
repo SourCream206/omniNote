@@ -11,14 +11,15 @@ import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset): void }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(): void; onRunExtension(command: string): void }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(): void; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 const clone = (objects: CanvasObject[]) => objects.map((object) => ({ ...object, payload: structuredClone(object.payload) }));
 const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
+let canvasClipboard: CanvasObject[] = [];
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<CanvasTool>('select');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
@@ -36,7 +37,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const pinch = useRef<{ distance: number; center: Point; camera: Camera } | null>(null);
   const touches = useRef(new Map<number, Point>());
   const history = useRef<{ past: CanvasObject[][]; future: CanvasObject[][] }>({ past: [], future: [] });
-  const clipboard = useRef<CanvasObject[]>([]);
+  const textEditStart = useRef(new Map<string, CanvasObject[]>());
   const objectsRef = useRef(objects);
   const cameraRef = useRef(camera);
   const selectedRef = useRef(selected);
@@ -209,7 +210,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     try { viewport.current?.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   }
 
-  function onWheel(event: React.WheelEvent) { event.preventDefault(); zoomAt(Math.exp(-event.deltaY * 0.0015), screen(event.nativeEvent)); }
+  function onWheel(event: React.WheelEvent) {
+    if ((event.target as HTMLElement).closest('.canvas-object.doc-active')) return;
+    event.preventDefault();
+    zoomAt(Math.exp(-event.deltaY * 0.0015), screen(event.nativeEvent));
+  }
   async function onDrop(event: React.DragEvent) {
     event.preventDefault();
     for (const file of Array.from(event.dataTransfer.files)) {
@@ -225,9 +230,19 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   function ungroupSelected() { commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, group_id: null } : object)); }
   function zOrder(front: boolean) { const top = Math.max(0, ...objectsRef.current.map((item) => item.z_index)); const bottom = Math.min(0, ...objectsRef.current.map((item) => item.z_index)); commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, z_index: front ? top + 1 : bottom - 1 } : object)); }
   function deleteSelected() { commit(objectsRef.current.filter((object) => !selectedRef.current.includes(object.id))); updateSelected([]); }
-  function copySelected() { clipboard.current = clone(objectsRef.current.filter((object) => selectedRef.current.includes(object.id))); }
-  function paste() { if (!clipboard.current.length) return; const copies = clipboard.current.map((object) => ({ ...object, id: crypto.randomUUID(), x: object.x + 28, y: object.y + 28, group_id: object.group_id ? crypto.randomUUID() : null })); commit([...objectsRef.current, ...copies]); updateSelected(copies.map((item) => item.id)); clipboard.current = clone(copies); }
+  function copySelected() { canvasClipboard = clone(objectsRef.current.filter((object) => selectedRef.current.includes(object.id))); }
+  function paste() {
+    if (!canvasClipboard.length) return;
+    const groups = new Map<string, string>();
+    const copies = canvasClipboard.map((object) => {
+      if (object.group_id && !groups.has(object.group_id)) groups.set(object.group_id, crypto.randomUUID());
+      return { ...object, id: crypto.randomUUID(), page_id: page.id, x: object.x + 28, y: object.y + 28, group_id: object.group_id ? groups.get(object.group_id)! : null };
+    });
+    commit([...objectsRef.current, ...copies]); updateSelected(copies.map((item) => item.id)); canvasClipboard = clone(copies);
+  }
   function updateText(id: string, doc: unknown) { updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, payload: { doc } } : object)); }
+  function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, clone(objectsRef.current)); }
+  function endTextEdit(id: string) { const before = textEditStart.current.get(id); if (before) { record(before); textEditStart.current.delete(id); } }
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -267,12 +282,12 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button><button title="Copy selected" onClick={copySelected}><Copy size={16} /></button><button title="Group selected" onClick={groupSelected}><Group size={16} /></button><button title="Ungroup" onClick={ungroupSelected}><Ungroup size={16} /></button><button title="Bring to front" onClick={() => zOrder(true)}><BringToFront size={16} /></button><button title="Send to back" onClick={() => zOrder(false)}><SendToBack size={16} /></button><button title="Delete selected" onClick={deleteSelected}><Trash2 size={16} /></button></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>
-    <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} nodes={nodes} />
+    <RichToolbar selectedObject={selectedObject} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} />
     <div ref={viewport} className="canvas-viewport" data-tool={tool} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => event.preventDefault()} style={{ backgroundPosition: `${camera.x}px ${camera.y}px`, backgroundSize: `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: object.z_index }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && <div className="object-header" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><span className="drag-grip">⋮⋮</span><span>{object.type === 'text' ? 'Note' : (object.payload as { name?: string }).name ?? object.type}</span>{object.type === 'document' && <button type="button" title="Enter document" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}><Maximize2 size={12} /> {activeDoc === object.id ? 'Exit' : 'Interact'}</button>}</div>}
-          {object.type === 'text' && <TextBlock object={object} onChange={(doc) => updateText(object.id, doc)} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => updateSelected([object.id])} />}
+          {object.type === 'text' && <TextBlock object={object} onChange={(doc) => updateText(object.id, doc)} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => updateSelected([object.id])} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} />}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} />}
           {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
@@ -282,7 +297,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
         {lasso.length > 1 && <svg className="lasso-overlay" overflow="visible"><polyline points={lasso.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#4471d0" strokeWidth={2 / camera.zoom} strokeDasharray="5 4" /></svg>}
       </div>
-      {!objects.length && <div className="canvas-empty"><PenLine size={30} /><strong>Your canvas starts anywhere</strong><span>Click to type, or choose a pen to draw.</span></div>}
+      {!objects.length && <div className="canvas-empty"><PenLine size={30} /><strong>Your canvas starts anywhere</strong><span>Choose Text and click to type, or choose a pen to draw.</span></div>}
       <div className="canvas-zoom"><button onClick={() => zoomAt(0.8, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Minus size={15} /></button><span>{Math.round(camera.zoom * 100)}%</span><button onClick={() => zoomAt(1.25, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Plus size={15} /></button><button title="Reset view" onClick={() => updateCamera({ x: 0, y: 0, zoom: 1 })}><Maximize2 size={15} /></button></div>
     </div>
     <div className="canvas-status"><span>{objects.length} objects · {visibleObjects.length} visible</span><span>Wheel to zoom · Space to pan · Shift-click to multi-select</span><span>{camera.zoom.toFixed(2)}×</span></div>
@@ -292,21 +307,27 @@ export default Canvas;
 
 function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
 
-function RichToolbar({ selectedObject, onAction, nodes }: { selectedObject?: CanvasObject; onAction(action: string): void; nodes: TreeNode[] }) {
+function RichToolbar({ selectedObject, onAction, onRequestLink, nodes }: { selectedObject?: CanvasObject; onAction(action: string): void; onRequestLink(): Promise<string | null>; nodes: TreeNode[] }) {
   const active = selectedObject?.type === 'text';
-  const link = () => { const url = window.prompt('Enter a web URL or choose a page below', 'https://'); if (url) onAction(`link:${url}`); };
-  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><button title="Heading" disabled={!active} onClick={() => onAction('heading')}><Heading1 size={15} /></button><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page" disabled={!active} value="" onChange={(event) => { if (event.target.value) onAction(`link:whiteboard://page/${event.target.value}`); }}><option value="">Link to page…</option>{nodes.filter((node) => node.kind === 'page').map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} /></div>;
+  const link = async () => { const url = await onRequestLink(); if (url) onAction(`link:${url}`); };
+  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><button title="Heading" disabled={!active} onClick={() => onAction('heading')}><Heading1 size={15} /></button><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} /></div>;
 }
 
-function TextBlock({ object, onChange, onNavigatePage, onOpenExternal, onSelect }: { object: CanvasObject; onChange(doc: unknown): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void }) {
+function TextBlock({ object, onChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; onChange(doc: unknown): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
   const editor = useEditor({ extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), TaskList, TaskItem.configure({ nested: true })], content: (object.payload as { doc: unknown }).doc as object, onUpdate: ({ editor }) => onChange(editor.getJSON()), editorProps: { attributes: { class: 'rich-content' }, handleClick: (_view, _pos, event) => {
     const link = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
     if (!link) return false;
     const href = link.getAttribute('href') || '';
     if (href.startsWith('whiteboard://page/')) onNavigatePage(href.slice('whiteboard://page/'.length));
+    else if (href.startsWith('whiteboard://section/')) onNavigatePage(href.slice('whiteboard://section/'.length));
     else onOpenExternal(href);
     return true;
   } } });
+  useEffect(() => {
+    if (!editor) return;
+    const next = (object.payload as { doc: unknown }).doc;
+    if (JSON.stringify(editor.getJSON()) !== JSON.stringify(next)) editor.commands.setContent(next as object, { emitUpdate: false });
+  }, [editor, object.payload]);
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ id: string; action: string }>).detail;
@@ -323,7 +344,7 @@ function TextBlock({ object, onChange, onNavigatePage, onOpenExternal, onSelect 
     document.addEventListener('whiteboard:text-command', handler);
     return () => document.removeEventListener('whiteboard:text-command', handler);
   }, [editor, object.id]);
-  return <div className="text-body" onPointerDown={(event) => event.stopPropagation()} onFocus={onSelect}><EditorContent editor={editor} /></div>;
+  return <div className="text-body" onPointerDown={(event) => event.stopPropagation()} onFocus={() => { onSelect(); onBeginEdit(); }} onBlur={onEndEdit}><EditorContent editor={editor} /></div>;
 }
 
 function ImageBlock({ assetId }: { assetId: string }) {

@@ -7,6 +7,9 @@ const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter(
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
 
 export default function App() {
+  const [dialogRequest, setDialogRequest] = useState<{ title: string; message?: string; mode: 'text' | 'confirm'; action: string } | null>(null);
+  const [dialogValue, setDialogValue] = useState('');
+  const dialogResolver = useRef<((value: string | null) => void) | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
@@ -50,9 +53,22 @@ export default function App() {
 
   const notifyError = (error: unknown) => setToast(error instanceof Error ? error.message : String(error));
 
+  function ask(title: string, value: string, action: string, mode: 'text' | 'confirm' = 'text', message?: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      dialogResolver.current = resolve;
+      setDialogValue(value);
+      setDialogRequest({ title, mode, action, message });
+    });
+  }
+  function finishDialog(value: string | null) {
+    dialogResolver.current?.(value);
+    dialogResolver.current = null;
+    setDialogRequest(null);
+  }
+
   async function createNode(kind: NodeKind, parentId: string | null) {
     const defaults: Record<NodeKind, string> = { notebook: 'New notebook', folder: 'New folder', section: 'New section', page: 'Untitled page' };
-    const title = window.prompt(`Name for ${kind}`, defaults[kind]);
+    const title = await ask(`Create ${kind}`, defaults[kind], 'Create');
     if (title === null) return;
     try {
       const nodeId = await window.whiteboard.createNode(parentId, kind, title);
@@ -66,14 +82,14 @@ export default function App() {
   }
 
   async function renameNode(node: TreeNode) {
-    const title = window.prompt(`Rename ${node.kind}`, node.title);
+    const title = await ask(`Rename ${node.kind}`, node.title, 'Rename');
     if (title === null || title === node.title) return;
     try { await window.whiteboard.renameNode(node.id, title); await refresh(); }
     catch (error) { notifyError(error); }
   }
 
   async function deleteNode(node: TreeNode) {
-    if (!window.confirm(`Delete “${node.title}” and everything inside it?`)) return;
+    if (!(await ask(`Delete ${node.kind}`, '', 'Delete', 'confirm', `Delete “${node.title}” and everything inside it?`))) return;
     try {
       await window.whiteboard.deleteNode(node.id);
       const data = await refresh();
@@ -93,6 +109,8 @@ export default function App() {
   function navigatePage(targetId: string) {
     const target = nodes.find((node) => node.id === targetId && node.kind === 'page');
     if (target) { setPageId(target.id); setSectionId(target.parent_id); }
+    const targetSection = nodes.find((node) => node.id === targetId && node.kind === 'section');
+    if (targetSection) { setSectionId(targetSection.id); setPageId(firstPageIn(nodes, targetSection.id)); }
   }
 
   function updatePage(pageIdValue: string, objects: CanvasObject[], camera: Camera) {
@@ -157,11 +175,12 @@ export default function App() {
       <aside className="page-sidebar"><div className="page-sidebar-head"><div><span className="eyebrow">SECTION</span><h2>{section?.title ?? 'Pages'}</h2></div><button className="icon-button" title="New page" disabled={!section} onClick={() => section && createNode('page', section.id)}><FilePlus2 size={18} /></button></div><div className="page-search"><Search size={14} /><span>Pages in this section</span></div><div className="page-list">{pages.map((item) => <div key={item.id} className={`page-item ${pageId === item.id ? 'active' : ''}`} draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', item.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const moving = event.dataTransfer.getData('text/plain'); if (moving) moveNode(moving, sectionId, item.id); }} onClick={() => setPageId(item.id)} onDoubleClick={() => renameNode(item)}><FileText size={16} /><div><strong>{item.title}</strong><small>{new Date(item.updated_at).toLocaleDateString()}</small></div><button className="page-delete" title="Delete page" onClick={(event) => { event.stopPropagation(); deleteNode(item); }}><X size={13} /></button></div>)}{section && !pages.length && <div className="empty-pages">No pages yet.<button onClick={() => createNode('page', section.id)}>Create a page</button></div>}</div><button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button></aside>
 
       <main className="editor-area">
-        {page ? <><div className="page-topline"><div><span className="eyebrow">PAGE</span><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>Created {new Date(page.created_at).toLocaleString()} · Updated {new Date(page.updated_at).toLocaleString()}</p></div><div className="page-actions"><button onClick={insertFiles}><Upload size={15} /> Insert file</button><button onClick={() => window.whiteboard.exportPagePdf().catch(notifyError)}><Download size={15} /> PDF</button></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={refresh} onRunExtension={runExtension} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p>{section && <button onClick={() => createNode('page', section.id)}>Create page</button>}</div>}
+        {page ? <><div className="page-topline"><div><span className="eyebrow">PAGE</span><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>Created {new Date(page.created_at).toLocaleString()} · Updated {new Date(page.updated_at).toLocaleString()}</p></div><div className="page-actions"><button onClick={insertFiles}><Upload size={15} /> Insert file</button><button onClick={() => window.whiteboard.exportPagePdf().catch(notifyError)}><Download size={15} /> PDF</button></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={refresh} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p>{section && <button onClick={() => createNode('page', section.id)}>Create page</button>}</div>}
       </main>
     </div>
 
     {showExtensions && <div className="modal-backdrop" onClick={() => setShowExtensions(false)}><div className="modal" onClick={(event) => event.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">LOCAL EXTENSIONS</span><h2>Extensions</h2></div><button className="icon-button" onClick={() => setShowExtensions(false)}><X size={18} /></button></div><p>Extensions load from <code>{snapshot.directory}\extensions</code>. Commands run in isolated browser workers.</p>{extensions.map((item) => <div className="extension-row" key={item.manifest.id}><span className="extension-symbol"><Puzzle size={19} /></span><div><strong>{item.manifest.name}</strong><small>{item.manifest.id} · v{item.manifest.version}</small></div><label className="mini-toggle"><input type="checkbox" checked={item.enabled} onChange={async (event) => { await window.whiteboard.enableExtension(item.manifest.id, event.target.checked); await refreshExtensions(); }} /><span /></label></div>)}<div className="extension-tip"><CalendarDays size={16} /><span>The bundled example adds an <strong>Insert date</strong> toolbar command.</span></div></div></div>}
+    {dialogRequest && <div className="modal-backdrop" onClick={() => finishDialog(null)}><form className="modal input-dialog" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); finishDialog(dialogRequest.mode === 'confirm' ? 'yes' : dialogValue.trim()); }} onKeyDown={(event) => { if (event.key === 'Escape') finishDialog(null); }}><div className="modal-head"><h2>{dialogRequest.title}</h2><button className="icon-button" type="button" onClick={() => finishDialog(null)}><X size={18} /></button></div>{dialogRequest.message && <p>{dialogRequest.message}</p>}{dialogRequest.mode === 'text' && <input autoFocus aria-label={dialogRequest.title} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} maxLength={200} required />}<div className="dialog-actions"><button type="button" onClick={() => finishDialog(null)}>Cancel</button><button type="submit" className={dialogRequest.action === 'Delete' ? 'danger' : 'primary'}>{dialogRequest.action}</button></div></form></div>}
     {toast && <div className="toast" role="status">{toast}<button onClick={() => setToast('')}><X size={13} /></button></div>}
   </div>;
 }

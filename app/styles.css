@@ -11,3 +11,12 @@
   .canvas-object.selected { outline: none; }
   .resize-handle, .object-header button, .document-shield { display: none !important; }
 }
+.input-dialog { width: min(390px, 90vw); }
+.input-dialog .modal-head { align-items: center; }
+.input-dialog .modal-head h2 { margin: 0; font-size: 18px; }
+.input-dialog input { display: block; width: 100%; margin: 20px 0 4px; padding: 10px 12px; border: 1px solid #ced8e8; border-radius: 8px; outline-color: #4d75c5; color: #263552; background: #fff; }
+.input-dialog p { color: #6f7d94; font-size: 12px; line-height: 1.5; margin: 16px 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; }
+.dialog-actions button { border: 1px solid #dce3ee; background: #fff; color: #50617e; border-radius: 7px; padding: 8px 14px; font-weight: 650; }
+.dialog-actions .primary { background: #315eb8; border-color: #315eb8; color: #fff; }
+.dialog-actions .danger { background: #bd4e5a; border-color: #bd4e5a; color: #fff; }

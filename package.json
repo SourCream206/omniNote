@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && vite build",
     "start": "npm run build && electron .",
     "ink-lab": "tsc -p tsconfig.json && electron . --ink-lab",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
+    "test": "node scripts/test-storage.cjs && node scripts/document-fixtures.cjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

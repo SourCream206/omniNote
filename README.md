@@ -11,7 +11,7 @@ npm ci
 npm start
 ```
 
-`npm start` builds the renderer and opens the desktop app. The workspace is stored in Electron's `userData/workspace` directory. Set `WHITEBOARD_WORKSPACE` to an absolute directory to use an isolated test workspace. Run `npm run ink-lab` to open the original stylus input experiment, or `npm run typecheck` to check both TypeScript projects.
+`npm start` builds the renderer and opens the desktop app. The workspace is stored in Electron's `userData/workspace` directory. Set `WHITEBOARD_WORKSPACE` to an absolute directory to use an isolated test workspace. Run `npm run ink-lab` to open the original stylus input experiment, `npm run typecheck` for the TypeScript projects, or `npm test` for storage, backup, and document-link fixture checks.
 
 ## Use
 
@@ -30,4 +30,4 @@ Local extensions live in the workspace's `extensions/` directory. The bundled `w
 
 This is a source-run test version, not an installer. PDF previews display the first 50 pages; XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. Link support depends on each previewer and should be checked against real documents; **Open original** is the fidelity fallback. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 
-The M0 ink lab needs feedback on your actual stylus and device. Check pressure, tilt, palm rejection, eraser button, and perceived latency. See [docs/PLAN.md](docs/PLAN.md) for architecture and milestone gates.
+The M0 ink lab needs feedback on your actual stylus and device. Check pressure, tilt, palm rejection, eraser button, and perceived latency. See [docs/PLAN.md](docs/PLAN.md) for architecture and milestone gates and [docs/VERSIONS.md](docs/VERSIONS.md) for runnable version checks.
