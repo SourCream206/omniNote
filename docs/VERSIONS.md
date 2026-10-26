@@ -13,6 +13,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v6 | Paper menu fix, searchable Extensions sidebar, fullscreen canvas, direct text and note appearance | Build and `npm test`; desktop checks of maximized launch, paper menu over live canvas, grid change, extension search, direct text and colored note box, fullscreen enter/tools/exit. |
 | v7 | Direct note interaction without the title strip | Build and `npm test`; desktop checks that clicks in empty text regions resume editing, clicking between overlapping notes edits the chosen note, and the compact move handle repositions it. |
 | v8 | Contextual formatting without canvas movement | Build and `npm test`; the text formatting row is positioned over the canvas instead of participating in its layout, including the normal, touch, and full-screen toolbar positions. |
+| v9 | Text size control | Build with Tiptap's font-size extension; storage and document fixture tests on Node 24; desktop check that selecting a note shows the size list in place of the heading button. |
 
 ## v3 hands-on checks
 

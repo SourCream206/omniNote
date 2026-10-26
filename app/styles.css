@@ -197,3 +197,4 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .canvas-shell > .rich-toolbar { position:absolute; top:38px; left:0; right:0; z-index:20; flex:none; box-shadow:0 3px 9px #152b4712; }
 .focus-canvas > .rich-toolbar { top:88px; left:10px; right:10px; z-index:37; }
 @media (pointer:coarse) { .canvas-shell:not(.focus-canvas) > .rich-toolbar { top:50px; } }
+.rich-toolbar .font-size-select { appearance:auto; width:96px; height:26px; margin-left:0; padding:0 5px; border:1px solid #dce3eb; border-radius:4px; background:#fff; color:#52657d; }
