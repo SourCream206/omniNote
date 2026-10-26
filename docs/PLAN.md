@@ -6,11 +6,11 @@ Status: approved plan; M0 input spike implemented and awaiting stylus-hardware f
 
 Electron + React + TypeScript; SQLite for hierarchy, objects, and settings; original documents in a workspace `assets/` directory. The renderer is sandboxed and receives only narrow, validated IPC calls. Document viewers and extensions run in separate sandboxed frames or workers.
 
-The final canvas uses a positioned DOM layer for rich text and document frames, a dedicated vector-ink layer, a spatial index for viewport culling, and an animation-frame camera transform. Re-lay out editable text at the effective zoom level rather than indefinitely scaling a low-resolution raster; inspect high-zoom text clarity during M2. A 60 fps target is measured on pages with hundreds of mixed objects rather than assumed.
+The current canvas uses positioned DOM objects and SVG vector strokes with bounding-box viewport culling. Camera changes update React state and CSS transforms. It does not yet have a spatial index or a separate WebGL renderer. Rich text stays DOM-based at high zoom. Measure the 60 fps target on the owner's device with hundreds of mixed objects; it is not established by the storage and UI tests.
 
 ## Data and migration
 
-`nodes(id, parent_id, kind, title, order_key, created_at, updated_at)` represent notebooks, nested folders, sections, and pages. `pages(id, camera_x, camera_y, camera_zoom)` stores page view state. `objects(id, page_id, type, x, y, width, height, rotation, z_index, group_id, payload_version, payload_json)` stores positioned content. `assets(id, relative_path, original_name, mime_type, sha256, size, updated_at)` references byte-for-byte original files. `extension_settings`, `extension_grants`, and `schema_migrations` have their own tables.
+`nodes(id, parent_id, kind, title, order_index, created_at, updated_at)` represent notebooks, nested folders, sections, and pages. `pages(id, camera_x, camera_y, camera_zoom, paper_style)` stores page view state. `objects(id, page_id, type, x, y, width, height, z_index, group_id, payload_version, payload_json)` stores positioned content. `assets(id, relative_path, original_name, mime_type, sha256, size, updated_at)` references byte-for-byte original files. `extension_settings`, `extension_grants`, and `schema_migrations` have their own tables.
 
 Reserve an `object_text` indexing projection for SQLite FTS5, including extracted PDF/DOCX text in a later search milestone. It remains derived data, so it can be rebuilt without touching originals. Preserve source page/object IDs in search rows for navigation.
 

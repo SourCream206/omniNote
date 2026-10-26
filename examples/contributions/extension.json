@@ -13,7 +13,6 @@
       { "id": "omninote.contributions.export", "title": "Export demo text" }
     ],
     "toolbar": [{ "command": "omninote.contributions.card", "label": "Demo card" }],
-    "sidebar": [{ "command": "omninote.contributions.card", "label": "Insert demo card" }],
     "canvasObjectTypes": [{ "type": "demo.card", "entry": "card.html" }],
     "documentViewers": [{ "extensions": ["omnidemo"], "entry": "viewer.html" }],
     "importers": [{ "extensions": ["txt"], "command": "omninote.contributions.import" }],
