@@ -102,8 +102,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
 
   const updateObjects = (next: CanvasObject[]) => { objectsRef.current = next; setObjects(next); scheduleSave(next, cameraRef.current); };
   const updateCamera = (next: Camera) => { cameraRef.current = next; setCamera(next); scheduleSave(objectsRef.current, next); };
-  const updateSelected = (next: string[]) => { selectedRef.current = next; setSelected(next); };
-  const updateTool = (next: CanvasTool) => { toolRef.current = next; setTool(next); setActiveDoc(null); };
+  const updateSelected = (next: string[]) => { selectedRef.current = next; setSelected(next); setAttachmentMenuId((current) => current && next.includes(current) ? current : null); };
+  const updateTool = (next: CanvasTool) => { toolRef.current = next; setTool(next); setActiveDoc(null); if (next !== 'select') updateSelected([]); };
 
   function scheduleSave(nextObjects: CanvasObject[], nextCamera: Camera) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -172,6 +172,15 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (!current || (Math.abs(current.height - size.height) < 12 && Math.abs(current.width - size.width) < 12)) return;
     updateObjects(objectsRef.current.map((item) => item.id === id ? { ...item, width: size.width, height: size.height } : item));
   }
+  function fitImage(id: string, naturalWidth: number, naturalHeight: number) {
+    if (!naturalWidth || !naturalHeight) return;
+    const current = objectsRef.current.find((item) => item.id === id);
+    if (!current || current.type !== 'image' || (current.payload as { imageFitted?: boolean }).imageFitted) return;
+    const scale = Math.min(current.width / naturalWidth, current.height / naturalHeight);
+    const width = Math.max(1, Math.round(naturalWidth * scale));
+    const height = Math.max(1, Math.round(naturalHeight * scale));
+    updateObjects(objectsRef.current.map((item) => item.id === id ? { ...item, x: item.x + (item.width - width) / 2, y: item.y + (item.height - height) / 2, width, height, payload: { ...item.payload, imageFitted: true } } : item));
+  }
   async function insertAsset(asset: Asset, presentation: 'block' | 'printout' = 'block', at?: Point) {
     const ext = asset.original_name.split('.').pop()?.toLowerCase() ?? '';
     const isImage = asset.mime_type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext);
@@ -180,7 +189,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const type: CanvasObject['type'] = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'document';
     const printout = type === 'document' && ['pdf', 'docx'].includes(ext) && presentation === 'printout';
     const objectWidth = printout ? (ext === 'docx' ? 850 : 620) : type === 'audio' ? 360 : 420;
-    let objectHeight = printout ? 1050 : type === 'audio' ? 88 : type === 'video' ? 270 : 320;
+    let objectHeight = printout ? 1050 : type === 'audio' ? 54 : type === 'video' ? 270 : 320;
     if (printout && ext === 'pdf') {
       try { objectHeight = await pdfPrintoutHeight(asset.id, objectWidth); }
       catch (error) { onError(error); }
@@ -189,7 +198,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const offset = (objectsRef.current.filter((item) => item.type !== 'ink').length % 6) * 28;
     const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block' } };
     setLocalAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
-    commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
+    commit([...objectsRef.current, object]); updateSelected([]); updateTool('select');
   }
   function insertExtensionObject(extensionId: string, objectType: string, data: unknown) {
     const center = centerWorld();
@@ -271,7 +280,15 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const position = world(point);
     if (current.kind === 'pan') { updateCamera({ ...current.camera, x: current.camera.x + point.x - current.start.x, y: current.camera.y + point.y - current.start.y }); return; }
     if (current.kind === 'move') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => current.selected.includes(object.id) ? { ...object, x: object.x + dx, y: object.y + dy } : object)); return; }
-    if (current.kind === 'resize') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => object.id === current.targetId ? { ...object, width: Math.max(90, object.width + dx), height: Math.max(70, object.height + dy) } : object)); return; }
+    if (current.kind === 'resize') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => {
+      if (object.id !== current.targetId) return object;
+      if (object.type === 'image') {
+        const change = Math.abs(dx / object.width) >= Math.abs(dy / object.height) ? dx / object.width : dy / object.height;
+        const scale = Math.max(90 / object.width, 70 / object.height, 1 + change);
+        return { ...object, width: object.width * scale, height: object.height * scale };
+      }
+      return { ...object, width: Math.max(90, object.width + dx), height: Math.max(70, object.height + dy) };
+    })); return; }
     if (current.kind === 'erase') { updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser)); return; }
     if (current.kind === 'lasso') { current.lasso!.push(position); setLasso([...current.lasso!]); return; }
     const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
@@ -423,11 +440,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextPoint) setContextPoint(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if (!(event.target as HTMLElement).closest('.canvas-object')) setContextPoint(screen(event.nativeEvent)); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
-          {object.type !== 'ink' && object.type !== 'text' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'document' || object.type === 'extension') && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
+          {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'document' || object.type === 'extension') && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
           {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
-          {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} />}
-          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} />}
+          {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} />}
+          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} />}
           {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onEnter={() => { setActiveDoc(object.id); updateSelected([object.id]); }} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
@@ -495,17 +512,17 @@ function TextBlock({ object, autoFocus, onChange, onFontSizeChange, onNavigatePa
   return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { onSelect(); onBeginEdit(); if (editor) onFontSizeChange(currentFontSize(editor)); }} onBlur={onEndEdit}><EditorContent editor={editor} /></div>;
 }
 
-function ImageBlock({ assetId }: { assetId: string }) {
+function ImageBlock({ assetId, onLoad }: { assetId: string; onLoad(width: number, height: number): void }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
     let active = true; let objectUrl = '';
     window.whiteboard.readAsset(assetId).then((bytes) => { objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); if (active) setUrl(objectUrl); }).catch(() => {});
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
-  return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} /> : <div className="image-loading">Loading image…</div>;
+  return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} /> : <div className="image-loading">Loading image…</div>;
 }
 
-function MediaBlock({ object, asset }: { object: CanvasObject; asset?: Asset }) {
+function MediaBlock({ object, asset, onSelect }: { object: CanvasObject; asset?: Asset; onSelect(): void }) {
   const assetId = (object.payload as { assetId: string }).assetId;
   const format = (object.payload as { format: string }).format;
   const mediaMime: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4', ogv: 'video/ogg' };
@@ -519,7 +536,7 @@ function MediaBlock({ object, asset }: { object: CanvasObject; asset?: Asset }) 
     return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId, asset?.mime_type, format]);
   if (!url) return <div className="image-loading">Loading media…</div>;
-  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => event.stopPropagation()}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => event.stopPropagation()} />;
+  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} />;
 }
 
 function ExtensionObject({ object, extensions, interactive, onEnter, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onEnter(): void; onError(error: unknown): void }) {
