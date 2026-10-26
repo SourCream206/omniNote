@@ -2,8 +2,8 @@ const { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } = r
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const JSZip = require('jszip');
 const { WorkspaceStore } = require('./storage.cjs');
+const { createWorkspaceArchive } = require('./export.cjs');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -48,12 +48,7 @@ function registerIpc() {
   handle('workspace:export', async () => {
     const result = await dialog.showSaveDialog(window, { title: 'Export notebook workspace', defaultPath: 'omninote-backup.zip', filters: [{ name: 'ZIP archive', extensions: ['zip'] }] });
     if (result.canceled || !result.filePath) return false;
-    store.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    const zip = new JSZip();
-    zip.file('notes.sqlite', fs.readFileSync(path.join(store.directory, 'notes.sqlite')));
-    zip.file('manifest.json', JSON.stringify({ format: 'omninote-workspace', schemaVersion: 1, exportedAt: new Date().toISOString() }, null, 2));
-    for (const asset of store.load().assets) zip.file(asset.relative_path.replaceAll('\\', '/'), fs.readFileSync(store.assetPath(asset.id).absolutePath));
-    fs.writeFileSync(result.filePath, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+    fs.writeFileSync(result.filePath, await createWorkspaceArchive(store));
     return true;
   });
   handle('page:export-pdf', async () => {
