@@ -20,6 +20,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v13 | Compact in-player audio drag grip | Build; isolated desktop check that the grip sits inside the audio pill and moves an audio attachment in the default Text mode. Older audio blocks are reduced to the player's height once. |
 | v14 | Compact fallback file attachments | Build; isolated desktop imports of an unsupported file and a corrupt PDF both show a file icon and name. An existing STL attachment shrinks from a preview-sized block, while the original remains available from its menu. |
 | v15 | Context menu for canvas items | Build; storage and document fixture tests. Right-click actions cover copy, cut, duplicate, paste at the pointer, grouping, order, and delete; blank canvas keeps note creation and gains paste. Desktop UI inspection was unavailable because the window automation helper returned the Codex window for the omniNote handle. |
+| v16 | Local workspace color themes | Build; storage and document fixture tests. Settings opens from the bottom of the activity rail with four keyboard-accessible themes. The selected theme is saved locally and the paper stays light for existing ink and document previews. |
 
 ## v3 hands-on checks
 

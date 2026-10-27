@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2 } from 'lucide-react';
 import type { Asset, CanvasObject, Camera, ExtensionInfo, NodeKind, PaperStyle, Snapshot, TreeNode } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
+import { readTheme, themes, type ThemeId } from './theme';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
@@ -15,7 +16,8 @@ export default function App() {
   const [pageId, setPageId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [activePanel, setActivePanel] = useState<'explorer' | 'extensions' | null>('explorer');
+  const [activePanel, setActivePanel] = useState<'explorer' | 'extensions' | 'settings' | null>('explorer');
+  const [theme, setTheme] = useState<ThemeId>(readTheme);
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [focusMode, setFocusMode] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -50,6 +52,7 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => { localStorage.setItem('omninote.sidebarWidth', String(sidebarWidth)); }, [sidebarWidth]);
+  useLayoutEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('omninote.theme', theme); }, [theme]);
 
   useEffect(() => {
     const closeMenus = (event: PointerEvent) => {
@@ -255,8 +258,8 @@ export default function App() {
     </header>
 
     <div className="app-body">
-      <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button></nav>
-      {activePanel && <aside className="notebook-sidebar" aria-label={activePanel === 'explorer' ? 'Explorer' : 'Extensions'} style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
+      <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button><button className={`settings-trigger ${activePanel === 'settings' ? 'active' : ''}`} title="Settings" aria-label="Settings" aria-expanded={activePanel === 'settings'} onClick={() => setActivePanel((panel) => panel === 'settings' ? null : 'settings')}><Settings2 size={20} /></button></nav>
+      {activePanel && <aside className="notebook-sidebar" aria-label={activePanel === 'explorer' ? 'Explorer' : activePanel === 'extensions' ? 'Extensions' : 'Settings'} style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks">
@@ -265,7 +268,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} />}
+        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
@@ -294,6 +297,31 @@ function ExtensionsPanel({ directory, extensions, onToggle, onSetting }: { direc
       {!visible.length && <p className="extensions-empty">{query ? 'No installed extensions match your search.' : 'No local extensions found.'}</p>}
     </div>
     <p className="extensions-location" title={`${directory}\\extensions`}>Local extensions in <code>workspace/extensions</code></p>
+  </div>;
+}
+
+function SettingsPanel({ theme, onThemeChange }: { theme: ThemeId; onThemeChange(value: ThemeId): void }) {
+  return <div className="settings-panel">
+    <div className="sidebar-title"><span>SETTINGS</span></div>
+    <div className="settings-scroll">
+      <div className="settings-section-heading">Appearance</div>
+      <div className="settings-label">Color Theme</div>
+      <div className="theme-options" role="radiogroup" aria-label="Color Theme">
+        {themes.map((choice, index) => <button key={choice.id} type="button" role="radio" aria-checked={theme === choice.id} tabIndex={theme === choice.id ? 0 : -1} className={`theme-option ${theme === choice.id ? 'selected' : ''}`} onClick={() => onThemeChange(choice.id)} onKeyDown={(event) => {
+          const direction = ['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : ['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 0;
+          if (!direction) return;
+          event.preventDefault();
+          const next = (index + direction + themes.length) % themes.length;
+          onThemeChange(themes[next].id);
+          event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('.theme-option')[next]?.focus();
+        }}>
+          <span className={`theme-preview theme-preview-${choice.id}`} aria-hidden="true"><i /><i /><i /></span>
+          <span className="theme-copy"><strong>{choice.name}</strong><small>{choice.description}</small></span>
+          {theme === choice.id && <Check size={15} aria-hidden="true" />}
+        </button>)}
+      </div>
+      <p className="settings-hint">Themes change the workspace. Page paper stays light so existing ink and documents remain easy to read.</p>
+    </div>
   </div>;
 }
 
