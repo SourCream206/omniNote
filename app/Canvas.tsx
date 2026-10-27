@@ -7,7 +7,7 @@ import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { FontSize, TextStyle } from '@tiptap/extension-text-style';
-import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, MoreHorizontal, Type, StickyNote, Move } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, MoreHorizontal, Type, StickyNote, Move, File } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
@@ -23,6 +23,28 @@ const clamp = (number: number, min: number, max: number) => Math.max(min, Math.m
 type TextAppearance = { color: string | null; opacity: number };
 const textAppearance = (object: CanvasObject): TextAppearance => (object.payload as { appearance?: TextAppearance }).appearance ?? { color: null, opacity: 100 };
 const paperColor = (appearance: TextAppearance) => appearance.color ? `${appearance.color}${Math.round(clamp(appearance.opacity, 0, 100) * 255 / 100).toString(16).padStart(2, '0')}` : 'transparent';
+const previewFormats = new Set(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'markdown', 'html', 'htm']);
+const fileTileSize = { width: 112, height: 106 };
+type FilePayload = { format: string; name: string; assetId: string; previewFailed?: boolean; fileTileCompact?: boolean; previewSize?: { width: number; height: number } };
+function documentViewer(format: string, extensions: ExtensionInfo[]) {
+  return extensions.filter((item) => item.enabled && item.grantedPermissions.includes('asset.read')).flatMap((extension) => (extension.manifest.contributes.documentViewers ?? []).filter((entry) => entry.extensions.includes(format)).map((entry) => ({ extension, entry: entry.entry })))[0];
+}
+function fileNeedsTile(object: CanvasObject, extensions: ExtensionInfo[]) {
+  if (object.type !== 'document') return false;
+  const payload = object.payload as FilePayload;
+  return Boolean(payload.previewFailed || (!previewFormats.has(payload.format) && !documentViewer(payload.format, extensions)));
+}
+function compactFile(object: CanvasObject, previewFailed = false): CanvasObject {
+  const payload = object.payload as FilePayload;
+  if (payload.fileTileCompact) return previewFailed ? { ...object, payload: { ...object.payload, previewFailed: true } } : object;
+  return { ...object, x: object.x + (object.width - fileTileSize.width) / 2, y: object.y + (object.height - fileTileSize.height) / 2, ...fileTileSize, payload: { ...object.payload, fileTileCompact: true, previewFailed: payload.previewFailed || previewFailed, previewSize: { width: object.width, height: object.height } } };
+}
+function expandFile(object: CanvasObject): CanvasObject {
+  const payload = object.payload as FilePayload;
+  const width = payload.previewSize?.width ?? 420;
+  const height = payload.previewSize?.height ?? 320;
+  return { ...object, x: object.x + (object.width - width) / 2, y: object.y + (object.height - height) / 2, width, height, payload: { ...object.payload, fileTileCompact: false } };
+}
 function plainTextOf(node: unknown): string {
   if (!node || typeof node !== 'object') return '';
   const value = node as { text?: string; content?: unknown[]; type?: string };
@@ -132,6 +154,15 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       : object);
     if (compacted.some((object, index) => object !== current[index])) updateObjects(compacted);
   }, [page.id]);
+  useEffect(() => {
+    const current = objectsRef.current;
+    const adjusted = current.map((object) => {
+      if (object.type !== 'document') return object;
+      if (fileNeedsTile(object, extensions)) return compactFile(object);
+      return (object.payload as FilePayload).fileTileCompact ? expandFile(object) : object;
+    });
+    if (adjusted.some((object, index) => object !== current[index])) updateObjects(adjusted);
+  }, [page.id, extensions]);
 
   function record(before: CanvasObject[]) {
     if (JSON.stringify(before) === JSON.stringify(objectsRef.current)) return;
@@ -188,22 +219,28 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const height = Math.max(1, Math.round(naturalHeight * scale));
     updateObjects(objectsRef.current.map((item) => item.id === id ? { ...item, x: item.x + (item.width - width) / 2, y: item.y + (item.height - height) / 2, width, height, payload: { ...item.payload, imageFitted: true } } : item));
   }
+  function previewUnavailable(id: string) {
+    const current = objectsRef.current;
+    const next = current.map((object) => object.id === id && ['document', 'image', 'audio', 'video'].includes(object.type) ? compactFile({ ...object, type: 'document' }, true) : object);
+    if (next.some((object, index) => object !== current[index])) updateObjects(next);
+  }
   async function insertAsset(asset: Asset, presentation: 'block' | 'printout' = 'block', at?: Point) {
     const ext = asset.original_name.split('.').pop()?.toLowerCase() ?? '';
     const isImage = asset.mime_type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','svg','bmp'].includes(ext);
     const isAudio = asset.mime_type.startsWith('audio/') || ['mp3','wav','m4a','ogg','oga','flac','aac','opus'].includes(ext);
     const isVideo = asset.mime_type.startsWith('video/') || ['mp4','webm','mov','m4v','ogv','avi','mkv'].includes(ext);
     const type: CanvasObject['type'] = isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'document';
+    const fileTile = type === 'document' && !previewFormats.has(ext) && !documentViewer(ext, extensions);
     const printout = type === 'document' && ['pdf', 'docx'].includes(ext) && presentation === 'printout';
-    const objectWidth = printout ? (ext === 'docx' ? 850 : 620) : type === 'audio' ? 360 : 420;
-    let objectHeight = printout ? 1050 : type === 'audio' ? 54 : type === 'video' ? 270 : 320;
+    const objectWidth = fileTile ? fileTileSize.width : printout ? (ext === 'docx' ? 850 : 620) : type === 'audio' ? 360 : 420;
+    let objectHeight = fileTile ? fileTileSize.height : printout ? 1050 : type === 'audio' ? 54 : type === 'video' ? 270 : 320;
     if (printout && ext === 'pdf') {
       try { objectHeight = await pdfPrintoutHeight(asset.id, objectWidth); }
       catch (error) { onError(error); }
     }
     const center = centerWorld();
     const offset = (objectsRef.current.filter((item) => item.type !== 'ink').length % 6) * 28;
-    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block', ...(type === 'audio' ? { audioCompact: true } : {}) } };
+    const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type, x: at?.x ?? center.x - objectWidth / 2 + offset, y: at?.y ?? center.y - (printout ? 100 : objectHeight / 2) + offset, width: objectWidth, height: objectHeight, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { assetId: asset.id, name: asset.original_name, format: ext, presentation: printout ? 'printout' : 'block', ...(type === 'audio' ? { audioCompact: true } : {}), ...(fileTile ? { fileTileCompact: true, previewSize: { width: 420, height: 320 } } : {}) } };
     setLocalAssets((current) => [...current.filter((item) => item.id !== asset.id), asset]);
     commit([...objectsRef.current, object]); updateSelected([]); updateTool('select');
   }
@@ -430,7 +467,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const visibleObjects = useMemo(() => objects.filter((object) => object.x + object.width >= worldView.minX && object.y + object.height >= worldView.minY && object.x <= worldView.maxX && object.y <= worldView.maxY).sort((a, b) => a.z_index - b.z_index), [objects, worldView.minX, worldView.minY, worldView.maxX, worldView.maxY]);
   const worldStyle = { transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` };
   const selectedObject = objects.find((object) => selected.includes(object.id));
-  const viewerFor = (format: string) => extensions.filter((item) => item.enabled && item.grantedPermissions.includes('asset.read')).flatMap((extension) => (extension.manifest.contributes.documentViewers ?? []).filter((entry) => entry.extensions.includes(format)).map((entry) => ({ extension, entry: entry.entry })))[0];
+  const viewerFor = (format: string) => documentViewer(format, extensions);
 
   return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
     {focusMode && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button><button onClick={onToggleFocus} title="Exit full screen"><Minimize2 size={15} /> Exit full screen</button></div>}
@@ -447,13 +484,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextPoint) setContextPoint(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if (!(event.target as HTMLElement).closest('.canvas-object')) setContextPoint(screen(event.nativeEvent)); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
-        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
-          {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'document' || object.type === 'extension') && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
+        {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
+          {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'extension' || (object.type === 'document' && !fileNeedsTile(object, extensions))) && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && !fileNeedsTile(object, extensions) && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
           {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
-          {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} />}
-          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} />}
-          {object.type === 'document' && <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onError={onError} />}
+          {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} onPreviewFailure={() => previewUnavailable(object.id)} />}
+          {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} onPreviewFailure={() => previewUnavailable(object.id)} />}
+          {object.type === 'document' && (fileNeedsTile(object, extensions) ? <FileTile name={(object.payload as FilePayload).name} /> : <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onPreviewFailure={() => previewUnavailable(object.id)} onError={onError} />)}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
         </div>)}
@@ -520,17 +557,21 @@ function TextBlock({ object, autoFocus, onChange, onFontSizeChange, onNavigatePa
   return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { onSelect(); onBeginEdit(); if (editor) onFontSizeChange(currentFontSize(editor)); }} onBlur={onEndEdit}><EditorContent editor={editor} /></div>;
 }
 
-function ImageBlock({ assetId, onLoad }: { assetId: string; onLoad(width: number, height: number): void }) {
+function FileTile({ name }: { name: string }) {
+  return <div className="file-tile" title={name}><File size={37} strokeWidth={1.25} aria-hidden="true" /><span>{name}</span></div>;
+}
+
+function ImageBlock({ assetId, onLoad, onPreviewFailure }: { assetId: string; onLoad(width: number, height: number): void; onPreviewFailure(): void }) {
   const [url, setUrl] = useState('');
   useEffect(() => {
     let active = true; let objectUrl = '';
-    window.whiteboard.readAsset(assetId).then((bytes) => { objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); if (active) setUrl(objectUrl); }).catch(() => {});
+    window.whiteboard.readAsset(assetId).then((bytes) => { objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); if (active) setUrl(objectUrl); }).catch(() => { if (active) onPreviewFailure(); });
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
-  return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} /> : <div className="image-loading">Loading image…</div>;
+  return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} onError={onPreviewFailure} /> : <div className="image-loading">Loading image…</div>;
 }
 
-function MediaBlock({ object, asset, onSelect, onMove }: { object: CanvasObject; asset?: Asset; onSelect(): void; onMove(event: React.PointerEvent): void }) {
+function MediaBlock({ object, asset, onSelect, onMove, onPreviewFailure }: { object: CanvasObject; asset?: Asset; onSelect(): void; onMove(event: React.PointerEvent): void; onPreviewFailure(): void }) {
   const assetId = (object.payload as { assetId: string }).assetId;
   const format = (object.payload as { format: string }).format;
   const mediaMime: Record<string, string> = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', m4v: 'video/mp4', ogv: 'video/ogg' };
@@ -540,11 +581,11 @@ function MediaBlock({ object, asset, onSelect, onMove }: { object: CanvasObject;
     window.whiteboard.readAsset(assetId).then((bytes) => {
       objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: asset?.mime_type || mediaMime[format] || '' }));
       if (live) setUrl(objectUrl);
-    }).catch(() => {});
+    }).catch(() => { if (live) onPreviewFailure(); });
     return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId, asset?.mime_type, format]);
   if (!url) return <div className="image-loading">Loading media…</div>;
-  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} /><button className="audio-move-handle" type="button" title="Drag audio" aria-label="Drag audio" onPointerDown={onMove} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} />;
+  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} onError={onPreviewFailure} /><button className="audio-move-handle" type="button" title="Drag audio" aria-label="Drag audio" onPointerDown={onMove} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} onError={onPreviewFailure} />;
 }
 
 function ExtensionObject({ object, extensions, interactive, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onError(error: unknown): void }) {

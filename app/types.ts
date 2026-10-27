@@ -8,7 +8,7 @@ export interface InkPoint { x: number; y: number; pressure: number; tiltX: numbe
 export type ObjectPayload =
   | { doc: unknown; appearance?: { color: string | null; opacity: number } }
   | { points: InkPoint[]; color: string; width: number; highlighter: boolean }
-  | { assetId: string; name: string; format: string; presentation?: 'block' | 'printout' }
+  | { assetId: string; name: string; format: string; presentation?: 'block' | 'printout'; audioCompact?: boolean; imageFitted?: boolean; previewFailed?: boolean; fileTileCompact?: boolean; previewSize?: { width: number; height: number } }
   | { extensionId: string; objectType: string; data: unknown };
 export interface CanvasObject { id: string; page_id: string; type: 'text' | 'ink' | 'image' | 'audio' | 'video' | 'document' | 'extension'; x: number; y: number; width: number; height: number; z_index: number; group_id: string | null; payload_version: number; payload: ObjectPayload }
 export interface Camera { x: number; y: number; zoom: number }

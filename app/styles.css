@@ -216,6 +216,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .attachment-popover button { border:0; border-radius:4px; padding:7px; background:transparent; color:#4b5e73; font-size:11px; text-align:left; }
 .attachment-popover button:hover { background:#f2f6fb; color:var(--ui-accent); }
 .canvas-object:not(.object-text):not(.object-ink) { border:0; border-radius:0; background:transparent; box-shadow:none; }
+.file-tile { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; gap:10px; padding:3px 2px; color:#202a35; cursor:move; user-select:none; }
+.file-tile svg { flex:0 0 auto; color:#727b86; }
+.file-tile span { width:100%; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; font-size:12px; line-height:1.25; text-align:center; }
+.file-tile-object .attachment-move { display:none; }
 .image-body { display:block; width:100%; height:100%; object-fit:fill; }
 .media-body { width:100%; height:100%; }
 .audio-body { position:relative; display:block; padding:0; }
