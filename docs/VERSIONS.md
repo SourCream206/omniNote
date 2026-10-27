@@ -21,6 +21,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v14 | Compact fallback file attachments | Build; isolated desktop imports of an unsupported file and a corrupt PDF both show a file icon and name. An existing STL attachment shrinks from a preview-sized block, while the original remains available from its menu. |
 | v15 | Context menu for canvas items | Build; storage and document fixture tests. Right-click actions cover copy, cut, duplicate, paste at the pointer, grouping, order, and delete; blank canvas keeps note creation and gains paste. Desktop UI inspection was unavailable because the window automation helper returned the Codex window for the omniNote handle. |
 | v16 | Local workspace color themes | Build; storage and document fixture tests. Settings opens from the bottom of the activity rail with four keyboard-accessible themes. The selected theme is saved locally and the paper stays light for existing ink and document previews. |
+| v17 | Settings sidebar overflow polish | Build; desktop check of the theme picker and Midnight workspace. The theme list no longer creates a horizontal scrollbar in the resizable Settings sidebar. |
 
 ## v3 hands-on checks
 
