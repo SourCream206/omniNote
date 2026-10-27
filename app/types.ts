@@ -42,6 +42,7 @@ export interface WhiteboardBridge {
   readAsset(assetId: string): Promise<Uint8Array>;
   copyImage(assetId: string): Promise<void>;
   copyText(text: string): Promise<void>;
+  readClipboard(): Promise<{ text: string; image: Uint8Array | null }>;
   openOriginal(assetId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   listExtensions(): Promise<ExtensionInfo[]>;

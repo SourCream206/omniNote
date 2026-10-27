@@ -7,7 +7,7 @@ import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { FontSize, TextStyle } from '@tiptap/extension-text-style';
-import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, MoreHorizontal, Type, StickyNote, Move, File } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Scissors, ClipboardPaste, Files, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, MoreHorizontal, Type, StickyNote, Move, File } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
@@ -16,6 +16,7 @@ import ExtensionFrame from './ExtensionFrame';
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
+type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 const clone = (objects: CanvasObject[]) => objects.map((object) => ({ ...object, payload: structuredClone(object.payload) }));
@@ -87,14 +88,16 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [attachmentMenuId, setAttachmentMenuId] = useState<string | null>(null);
   const [focusToolsOpen, setFocusToolsOpen] = useState(false);
   const [focusTextId, setFocusTextId] = useState<string | null>(null);
-  const [contextPoint, setContextPoint] = useState<Point | null>(null);
+  const [contextMenu, setContextMenu] = useState<CanvasContextMenu | null>(null);
   useEffect(() => { if (focusMode) setFocusToolsOpen(false); }, [focusMode]);
   useEffect(() => {
-    if (!contextPoint) return;
-    const close = (event: PointerEvent) => { if (!(event.target as HTMLElement).closest('.canvas-context-menu')) setContextPoint(null); };
+    if (!contextMenu) return;
+    const close = (event: PointerEvent) => { if (!(event.target as HTMLElement).closest('.canvas-context-menu')) setContextMenu(null); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setContextMenu(null); };
     document.addEventListener('pointerdown', close, true);
-    return () => document.removeEventListener('pointerdown', close, true);
-  }, [contextPoint]);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', close, true); document.removeEventListener('keydown', escape); };
+  }, [contextMenu]);
   useEffect(() => {
     if (!actionsOpen) return;
     const close = (event: PointerEvent) => { if (!actionsRef.current?.contains(event.target as Node)) setActionsOpen(false); };
@@ -261,6 +264,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }
 
   function startObjectGesture(event: React.PointerEvent, object: CanvasObject, kind: 'move' | 'resize') {
+    if (event.button !== 0) return;
     const explicitHandle = Boolean((event.target as HTMLElement).closest('.audio-move-handle, .attachment-move, .note-move-handle'));
     if (toolRef.current !== 'select' && object.type !== 'text' && !explicitHandle) return;
     event.stopPropagation(); event.preventDefault();
@@ -399,14 +403,35 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       void window.whiteboard.copyImage((canvasClipboard[0].payload as { assetId: string }).assetId).catch((error) => { onError(error); return window.whiteboard.copyText(text); });
     } else void window.whiteboard.copyText(text).catch(onError);
   }
-  function paste() {
+  function cutSelected() { if (selectedRef.current.length) { copySelected(); deleteSelected(); } }
+  function paste(at?: Point) {
     if (!canvasClipboard.length) return;
     const groups = new Map<string, string>();
+    const minX = Math.min(...canvasClipboard.map((object) => object.x));
+    const minY = Math.min(...canvasClipboard.map((object) => object.y));
     const copies = canvasClipboard.map((object) => {
       if (object.group_id && !groups.has(object.group_id)) groups.set(object.group_id, crypto.randomUUID());
-      return { ...object, id: crypto.randomUUID(), page_id: page.id, x: object.x + 28, y: object.y + 28, group_id: object.group_id ? groups.get(object.group_id)! : null };
+      return { ...object, id: crypto.randomUUID(), page_id: page.id, x: at ? at.x + object.x - minX : object.x + 28, y: at ? at.y + object.y - minY : object.y + 28, group_id: object.group_id ? groups.get(object.group_id)! : null };
     });
     commit([...objectsRef.current, ...copies]); updateSelected(copies.map((item) => item.id)); canvasClipboard = clone(copies);
+  }
+  function duplicateSelected() {
+    if (!selectedRef.current.length) return;
+    const previous = canvasClipboard;
+    canvasClipboard = clone(objectsRef.current.filter((object) => selectedRef.current.includes(object.id)));
+    paste();
+    canvasClipboard = previous;
+  }
+  async function pasteFromMenu(point: Point) {
+    try {
+      const clipboard = await window.whiteboard.readClipboard();
+      if (clipboard.image?.length) {
+        const asset = await window.whiteboard.importAsset('Pasted image.png', 'image/png', clipboard.image);
+        await insertAsset(asset, 'block', world(point));
+        await onAssetImported(asset);
+      } else if (canvasClipboard.length && clipboard.text.replace(/\r\n/g, '\n') === canvasClipboardText.replace(/\r\n/g, '\n')) paste(world(point));
+      else if (clipboard.text) { const position = world(point); createText(position.x, position.y, clipboard.text); }
+    } catch (error) { onError(error); }
   }
   function updateText(id: string, doc: unknown) { updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, payload: { ...object.payload, doc } } : object)); }
   function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, clone(objectsRef.current)); }
@@ -423,6 +448,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       if (command && key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       else if (command && key === 'y') { event.preventDefault(); redo(); }
       else if (command && key === 'c' && selectedRef.current.length) { event.preventDefault(); copySelected(); }
+      else if (command && key === 'x' && selectedRef.current.length) { event.preventDefault(); cutSelected(); }
       else if (command && key === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelected() : groupSelected(); }
       else if (key === 'delete' || key === 'backspace') { if (selectedRef.current.length) { event.preventDefault(); deleteSelected(); } }
       else if (key === 'escape') { updateSelected([]); setActiveDoc(null); }
@@ -467,6 +493,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const visibleObjects = useMemo(() => objects.filter((object) => object.x + object.width >= worldView.minX && object.y + object.height >= worldView.minY && object.x <= worldView.maxX && object.y <= worldView.maxY).sort((a, b) => a.z_index - b.z_index), [objects, worldView.minX, worldView.minY, worldView.maxX, worldView.maxY]);
   const worldStyle = { transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` };
   const selectedObject = objects.find((object) => selected.includes(object.id));
+  const contextObject = contextMenu?.objectId ? objects.find((object) => object.id === contextMenu.objectId) : null;
   const viewerFor = (format: string) => documentViewer(format, extensions);
 
   return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
@@ -482,7 +509,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>}
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
-    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextPoint) setContextPoint(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if (!(event.target as HTMLElement).closest('.canvas-object')) setContextPoint(screen(event.nativeEvent)); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
+    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point: screen(event.nativeEvent), objectId: object?.id ?? null }); setAttachmentMenuId(null); setActionsOpen(false); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'extension' || (object.type === 'document' && !fileNeedsTile(object, extensions))) && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && !fileNeedsTile(object, extensions) && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
@@ -497,7 +524,26 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
         {lasso.length > 1 && <svg className="lasso-overlay" overflow="visible"><polyline points={lasso.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#4471d0" strokeWidth={2 / camera.zoom} strokeDasharray="5 4" /></svg>}
       </div>
-      {contextPoint && <div className="canvas-context-menu" style={{ left: contextPoint.x, top: contextPoint.y }} onPointerDown={(event) => event.stopPropagation()}><button onClick={() => { const point = world(contextPoint); createText(point.x, point.y, '', true); setContextPoint(null); }}><StickyNote size={15} /> Add note box</button><button onClick={() => { const point = world(contextPoint); createText(point.x, point.y); setContextPoint(null); }}><Type size={15} /> Add text</button></div>}
+      {contextMenu && <div className="canvas-context-menu" role="menu" aria-label={contextObject ? 'Object actions' : 'Canvas actions'} style={{ left: Math.max(8, Math.min(contextMenu.point.x, viewportSize.width - 188)), top: Math.max(8, Math.min(contextMenu.point.y, viewportSize.height - (contextObject ? 310 : 128))) }} onPointerDown={(event) => event.stopPropagation()} onWheel={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
+        {contextObject ? <>
+          <button role="menuitem" onClick={() => { copySelected(); setContextMenu(null); }}><Copy size={15} /> Copy</button>
+          <button role="menuitem" onClick={() => { cutSelected(); setContextMenu(null); }}><Scissors size={15} /> Cut</button>
+          <button role="menuitem" onClick={() => { duplicateSelected(); setContextMenu(null); }}><Files size={15} /> Duplicate</button>
+          <button role="menuitem" onClick={() => { void pasteFromMenu(contextMenu.point); setContextMenu(null); }}><ClipboardPaste size={15} /> Paste here</button>
+          <div className="context-menu-separator" />
+          {selected.length > 1 && <button role="menuitem" onClick={() => { groupSelected(); setContextMenu(null); }}><Group size={15} /> Group</button>}
+          {selected.some((id) => objects.find((object) => object.id === id)?.group_id) && <button role="menuitem" onClick={() => { ungroupSelected(); setContextMenu(null); }}><Ungroup size={15} /> Ungroup</button>}
+          <button role="menuitem" onClick={() => { zOrder(true); setContextMenu(null); }}><BringToFront size={15} /> Bring to front</button>
+          <button role="menuitem" onClick={() => { zOrder(false); setContextMenu(null); }}><SendToBack size={15} /> Send to back</button>
+          <div className="context-menu-separator" />
+          <button className="danger" role="menuitem" onClick={() => { deleteSelected(); setContextMenu(null); }}><Trash2 size={15} /> Delete</button>
+        </> : <>
+          <button role="menuitem" onClick={() => { void pasteFromMenu(contextMenu.point); setContextMenu(null); }}><ClipboardPaste size={15} /> Paste here</button>
+          <div className="context-menu-separator" />
+          <button role="menuitem" onClick={() => { const point = world(contextMenu.point); createText(point.x, point.y, '', true); setContextMenu(null); }}><StickyNote size={15} /> Add note box</button>
+          <button role="menuitem" onClick={() => { const point = world(contextMenu.point); createText(point.x, point.y); setContextMenu(null); }}><Type size={15} /> Add text</button>
+        </>}
+      </div>}
       <div className="canvas-zoom"><button onClick={() => zoomAt(0.8, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Minus size={15} /></button><span>{Math.round(camera.zoom * 100)}%</span><button onClick={() => zoomAt(1.25, { x: viewportSize.width / 2, y: viewportSize.height / 2 })}><Plus size={15} /></button><button title="Reset view" onClick={() => updateCamera({ x: 0, y: 0, zoom: 1 })}><Maximize2 size={15} /></button></div>
     </div>
   </div>;
@@ -521,6 +567,7 @@ function RichToolbar({ selectedObject, fontSize, onAction, onRequestLink, nodes,
 }
 
 function TextBlock({ object, autoFocus, onChange, onFontSizeChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; autoFocus: boolean; onChange(doc: unknown): void; onFontSizeChange(size: string): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
+  const rightPointerDown = useRef(false);
   const currentFontSize = (editor: { getAttributes(name: string): Record<string, unknown> }) => String(editor.getAttributes('textStyle').fontSize ?? '');
   const editor = useEditor({ extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), TaskList, TaskItem.configure({ nested: true }), TextStyle, FontSize], content: (object.payload as { doc: unknown }).doc as object, onUpdate: ({ editor }) => { onChange(editor.getJSON()); onFontSizeChange(currentFontSize(editor)); }, onSelectionUpdate: ({ editor }) => onFontSizeChange(currentFontSize(editor)), editorProps: { attributes: { class: 'rich-content' }, handleClick: (_view, _pos, event) => {
     const link = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
@@ -554,7 +601,7 @@ function TextBlock({ object, autoFocus, onChange, onFontSizeChange, onNavigatePa
     document.addEventListener('whiteboard:text-command', handler);
     return () => document.removeEventListener('whiteboard:text-command', handler);
   }, [editor, object.id]);
-  return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { onSelect(); onBeginEdit(); if (editor) onFontSizeChange(currentFontSize(editor)); }} onBlur={onEndEdit}><EditorContent editor={editor} /></div>;
+  return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); rightPointerDown.current = event.button === 2; if (event.button === 0) onSelect(); }} onContextMenu={() => { setTimeout(() => { rightPointerDown.current = false; }, 0); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { if (!rightPointerDown.current) onSelect(); onBeginEdit(); if (editor) onFontSizeChange(currentFontSize(editor)); }} onBlur={() => { rightPointerDown.current = false; onEndEdit(); }}><EditorContent editor={editor} /></div>;
 }
 
 function FileTile({ name }: { name: string }) {
@@ -585,7 +632,7 @@ function MediaBlock({ object, asset, onSelect, onMove, onPreviewFailure }: { obj
     return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId, asset?.mime_type, format]);
   if (!url) return <div className="image-loading">Loading media…</div>;
-  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} onError={onPreviewFailure} /><button className="audio-move-handle" type="button" title="Drag audio" aria-label="Drag audio" onPointerDown={onMove} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); onSelect(); }} onError={onPreviewFailure} />;
+  return object.type === 'audio' ? <div className="media-body audio-body" onPointerDown={(event) => { event.stopPropagation(); if (event.button === 0) onSelect(); }}><audio src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Audio attachment'} onError={onPreviewFailure} /><button className="audio-move-handle" type="button" title="Drag audio" aria-label="Drag audio" onPointerDown={onMove} /></div> : <video className="media-body video-body" src={url} controls preload="metadata" aria-label={asset?.original_name ?? 'Video attachment'} onPointerDown={(event) => { event.stopPropagation(); if (event.button === 0) onSelect(); }} onError={onPreviewFailure} />;
 }
 
 function ExtensionObject({ object, extensions, interactive, onError }: { object: CanvasObject; extensions: ExtensionInfo[]; interactive: boolean; onError(error: unknown): void }) {

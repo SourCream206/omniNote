@@ -188,9 +188,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .note-move-handle:hover { color:#315e8c; background:#fff; }
 .object-text .rich-content p { margin:0; }
 .canvas-viewport[data-paper=lines] .object-text:not(.boxed-note) .rich-content { line-height:32px; }
-.canvas-context-menu { position:absolute; z-index:35; min-width:143px; padding:4px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
+.canvas-context-menu { position:absolute; z-index:35; width:180px; max-height:calc(100% - 16px); overflow-y:auto; padding:4px; border:1px solid #dce3eb; border-radius:6px; background:#fff; box-shadow:0 8px 22px #21375724; }
 .canvas-context-menu button { display:flex; align-items:center; gap:8px; width:100%; border:0; border-radius:4px; background:transparent; padding:7px 8px; color:#4b5e73; text-align:left; font-size:11px; }
 .canvas-context-menu button:hover { background:#f2f6fb; }
+.canvas-context-menu button.danger { color:#b44f5b; }
+.canvas-context-menu button.danger:hover { background:#fff0f1; }
+.context-menu-separator { height:1px; margin:4px 6px; background:#e9edf3; }
 
 /* Contextual formatting floats above the page, leaving canvas coordinates fixed. */
 .canvas-shell { position:relative; }

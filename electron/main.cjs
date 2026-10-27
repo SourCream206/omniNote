@@ -41,6 +41,13 @@ function registerIpc() {
     if (typeof text !== 'string' || text.length > 1_000_000) throw new Error('Invalid clipboard text');
     return clipboard.writeText(text);
   });
+  handle('clipboard:read', () => {
+    const text = clipboard.readText().slice(0, 1_000_000);
+    const image = clipboard.readImage();
+    const bytes = image.isEmpty() ? null : image.toPNG();
+    if (bytes && bytes.length > 32_000_000) throw new Error('Clipboard image is too large');
+    return { text, image: bytes ? new Uint8Array(bytes) : null };
+  });
   handle('asset:pick', async () => {
     const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
     if (result.canceled) return [];
