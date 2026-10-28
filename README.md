@@ -1,4 +1,4 @@
-# omniNote
+# omniNote (working name)
 
 A local-first desktop notebook with nested folders and sections, an infinite canvas, vector ink, embedded original documents, and a local extension host. Phase 1 uses Electron, React, TypeScript, and SQLite. No account or sync service is involved.
 
