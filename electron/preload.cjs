@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   openOriginal: (assetId) => invoke('asset:open', assetId),
   openExternal: (url) => invoke('link:open', url),
   listExtensions: () => invoke('extension:list'),
+  searchMarketplace: (query) => invoke('marketplace:search', query),
+  installMarketplaceExtension: (extensionId, version) => invoke('marketplace:install', extensionId, version),
   extensionSource: (extensionId) => invoke('extension:source', extensionId),
   extensionResource: (extensionId, fileName) => invoke('extension:resource', extensionId, fileName),
   enableExtension: (extensionId, enabled, permissions) => invoke('extension:enable', extensionId, enabled, permissions),

@@ -28,7 +28,7 @@ npm start
 
 ## Extensions
 
-Local extensions live in the workspace's `extensions/` directory. The bundled `whiteboard.date-insert` example is copied there on first launch. Its toolbar button runs in a worker and inserts today's date through the restricted `canvas.write` bridge. The Extensions icon opens a searchable list in the resizable sidebar, with enable switches and inline settings. Search covers installed local extensions; there is no online marketplace in phase 1. API 1.0 supports commands, toolbar/sidebar contributions, canvas object types, document viewers, import/export handlers, and settings. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md) for the manifest and message contracts.
+Local extensions live in the workspace's `extensions/` directory. The bundled `whiteboard.date-insert` example is copied there on first launch. Its toolbar button runs in a worker and inserts today's date through the restricted `canvas.write` bridge. The Extensions icon opens a searchable list in the resizable sidebar, with enable switches and inline settings. When a catalog URL is configured, the same search also discovers marketplace packages and installs them locally after integrity checks. No catalog host is configured yet. API 1.0 supports commands, toolbar/sidebar contributions, canvas object types, document viewers, import/export handlers, and settings. See [docs/EXTENSIONS.md](docs/EXTENSIONS.md) for the manifest, catalog, and message contracts.
 
 ## Current limits and testing
 

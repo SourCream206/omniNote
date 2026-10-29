@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2 } from 'lucide-react';
-import type { Asset, CanvasObject, Camera, ExtensionInfo, NodeKind, PaperStyle, Snapshot, TreeNode } from './types';
+import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
+import MarketplacePanel from './MarketplacePanel';
 import { readTheme, themes, type ThemeId } from './theme';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
@@ -36,6 +37,11 @@ export default function App() {
     return data;
   }, []);
   const refreshExtensions = useCallback(async () => setExtensions(await window.whiteboard.listExtensions()), []);
+  const searchMarketplace = useCallback((query: string): Promise<MarketplaceSearch> => window.whiteboard.searchMarketplace(query), []);
+  const installMarketplace = useCallback(async (entry: MarketplaceEntry) => {
+    await window.whiteboard.installMarketplaceExtension(entry.id, entry.version);
+    await refreshExtensions();
+  }, [refreshExtensions]);
 
   useEffect(() => {
     Promise.all([refresh(), refreshExtensions()]).then(([data]) => {
@@ -268,7 +274,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} />}
+        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
@@ -281,20 +287,22 @@ export default function App() {
   </div>;
 }
 
-function ExtensionsPanel({ directory, extensions, onToggle, onSetting }: { directory: string; extensions: ExtensionInfo[]; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void }) {
+function ExtensionsPanel({ directory, extensions, onToggle, onSetting, onSearch, onInstall }: { directory: string; extensions: ExtensionInfo[]; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void; onSearch(query: string): Promise<MarketplaceSearch>; onInstall(entry: MarketplaceEntry): Promise<void> }) {
   const [query, setQuery] = useState('');
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const visible = extensions.filter((item) => `${item.manifest.name} ${item.manifest.id} ${item.manifest.version}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <div className="extensions-panel">
     <div className="sidebar-title"><span>EXTENSIONS</span><span className="extension-count">{extensions.length}</span></div>
-    <label className="extension-search"><Search size={15} /><input aria-label="Search extensions" placeholder="Search installed extensions" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button title="Clear search" onClick={() => setQuery('')}><X size={14} /></button>}</label>
+    <label className="extension-search"><Search size={15} /><input aria-label="Search extensions" placeholder="Search extensions" value={query} onChange={(event) => setQuery(event.target.value)} />{query && <button title="Clear search" aria-label="Clear search" onClick={() => setQuery('')}><X size={14} /></button>}</label>
     <div className="extensions-list">
+      <div className="marketplace-section-label">Installed</div>
       {visible.map((item) => <div className="extension-entry" key={item.manifest.id}>
         <div className="extension-entry-main"><Puzzle size={18} /><div><strong>{item.manifest.name}</strong><small>v{item.manifest.version} · {item.enabled ? 'Enabled' : 'Disabled'}</small></div><label className="mini-toggle" title={`${item.enabled ? 'Disable' : 'Enable'} ${item.manifest.name}`}><input type="checkbox" checked={item.enabled} onChange={(event) => onToggle(item, event.target.checked)} /></label></div>
         <div className="extension-entry-detail"><span title={item.manifest.id}>{item.manifest.id}</span>{!!item.manifest.contributes.settings?.length && item.enabled && <button onClick={() => setSettingsId(settingsId === item.manifest.id ? null : item.manifest.id)} aria-expanded={settingsId === item.manifest.id}>Settings <ChevronDown size={12} /></button>}</div>
         {settingsId === item.manifest.id && item.enabled && <div className="extension-settings">{item.manifest.contributes.settings?.map((setting) => <label key={setting.key}>{setting.label}{setting.type === 'boolean' ? <input type="checkbox" checked={Boolean(item.settings[setting.key])} onChange={(event) => onSetting(item.manifest.id, setting.key, event.target.checked)} /> : <input type="text" key={`${item.manifest.id}:${setting.key}`} defaultValue={String(item.settings[setting.key] ?? '')} onBlur={(event) => onSetting(item.manifest.id, setting.key, event.target.value)} />}</label>)}</div>}
       </div>)}
       {!visible.length && <p className="extensions-empty">{query ? 'No installed extensions match your search.' : 'No local extensions found.'}</p>}
+      <MarketplacePanel query={query} installedIds={new Set(extensions.map((item) => item.manifest.id))} search={onSearch} install={onInstall} />
     </div>
     <p className="extensions-location" title={`${directory}\\extensions`}>Local extensions in <code>workspace/extensions</code></p>
   </div>;

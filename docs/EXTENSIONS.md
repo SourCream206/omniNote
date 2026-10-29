@@ -1,5 +1,31 @@
 # Local extensions (API 1.0)
 
+## Marketplace scaffold
+
+The Extensions sidebar can search a configured online catalog and install a package into the local `extensions/` directory. The package must be on the catalog's HTTPS origin, match its SHA-256 digest, and have a manifest with the listed ID, version, API version, and permissions. New installs stay disabled until the user reviews and grants their permissions. Installed extensions continue to work offline. Extension update and uninstall flows are not implemented yet.
+
+Set `marketplaceUrl` in the root `distribution.json` before packaging a release. The URL points to a static `catalog.json`; package paths in the catalog are relative to it. For local development, `OMNINOTE_MARKETPLACE_URL` may point to an HTTP loopback server. Generate an example catalog and package with `npm run marketplace:example`, then serve the generated `marketplace/dist/` directory locally. The source repository stays private; any catalog and packages you publish are visible to whoever can access that site. No marketplace host is configured in the repository yet.
+
+Catalog format:
+
+```json
+{
+  "schemaVersion": 1,
+  "extensions": [{
+    "id": "publisher.extension",
+    "name": "Example",
+    "summary": "What it adds",
+    "version": "1.0.0",
+    "apiVersion": "1.0.0",
+    "permissions": ["canvas.write"],
+    "package": "publisher.extension-1.0.0.zip",
+    "sha256": "64 lowercase hexadecimal characters"
+  }]
+}
+```
+
+The ZIP contains flat files: `extension.json`, the declared `.js` entry, and any declared `.html` views. The main process fetches and checks the catalog and package; extension workers and frames still have no direct network access. The digest protects against a package that differs from the trusted catalog, so control of the catalog host remains a security boundary. Third-party publishing will need a review and signing process before opening submissions.
+
 Extensions are directories under the active workspace's `extensions/` folder. Each directory name must match the `id` in its `extension.json`. The app loads installed extensions disabled by default. Open **Extensions** from the left activity rail to review and enable one; the enable dialog lists its requested permissions.
 
 The bundled `whiteboard.date-insert` is the small core example. It is copied on first launch and pre-enabled only when its source matches the bundled file. `examples/contributions/` is a broader demonstration; copy that directory to `extensions/omninote.contributions` to inspect its contribution points. It is not installed automatically.

@@ -6,3 +6,5 @@ dist-ui/
 *.sqlite-wal
 *.sqlite-shm
 workspace/
+marketplace/dist/
+release/

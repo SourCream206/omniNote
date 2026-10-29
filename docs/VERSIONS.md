@@ -23,6 +23,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v16 | Local workspace color themes | Build; storage and document fixture tests. Settings opens from the bottom of the activity rail with four keyboard-accessible themes. The selected theme is saved locally and the paper stays light for existing ink and document previews. |
 | v17 | Settings sidebar overflow polish | Build; desktop check of the theme picker and Midnight workspace. The theme list no longer creates a horizontal scrollbar in the resizable Settings sidebar. |
 | v18 | Review fixes for saving, gestures, protocol paths, and explorer access | Build; storage and document fixtures; app protocol path test. Backup waits for the current page save, close flushes pending changes, cancelled gestures no longer commit, and explorer item actions appear on keyboard focus or touch. Rendered UI and stylus checks remain outstanding because the window automation layer returned an unrelated browser image for the omniNote window. |
+| v19 | Marketplace catalog and verified local install scaffold | Build; storage, document, protocol, and marketplace tests. The Extensions sidebar searches a configured catalog; installs verify the ZIP digest and manifest, then start disabled. Generated example catalog/package can be hosted on a static site. No public host or extension update channel is configured. |
 
 ## v3 hands-on checks
 

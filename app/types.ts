@@ -28,6 +28,8 @@ export interface ExtensionManifest {
   };
 }
 export interface ExtensionInfo { manifest: ExtensionManifest; enabled: boolean; grantedPermissions: string[]; settings: Record<string, boolean | string> }
+export interface MarketplaceEntry { id: string; name: string; summary: string; version: string; apiVersion: string; permissions: string[] }
+export interface MarketplaceSearch { configured: boolean; entries: MarketplaceEntry[] }
 
 export interface WhiteboardBridge {
   load(): Promise<Snapshot>;
@@ -47,6 +49,8 @@ export interface WhiteboardBridge {
   openOriginal(assetId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   listExtensions(): Promise<ExtensionInfo[]>;
+  searchMarketplace(query: string): Promise<MarketplaceSearch>;
+  installMarketplaceExtension(extensionId: string, version: string): Promise<{ id: string; version: string }>;
   extensionSource(extensionId: string): Promise<string>;
   extensionResource(extensionId: string, fileName: string): Promise<string>;
   enableExtension(extensionId: string, enabled: boolean, permissions?: string[]): Promise<void>;

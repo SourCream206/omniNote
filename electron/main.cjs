@@ -5,6 +5,8 @@ const { pathToFileURL } = require('node:url');
 const { WorkspaceStore } = require('./storage.cjs');
 const { createWorkspaceArchive } = require('./export.cjs');
 const { resolveAppFile } = require('./protocol-path.cjs');
+const { Marketplace } = require('./marketplace.cjs');
+const distribution = require('../distribution.json');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -12,6 +14,7 @@ protocol.registerSchemesAsPrivileged([
 
 let store;
 let window;
+let marketplace;
 const projectRoot = path.resolve(__dirname, '..');
 
 function registerIpc() {
@@ -72,6 +75,8 @@ function registerIpc() {
     await shell.openExternal(url.toString());
   });
   handle('extension:list', () => store.listExtensions());
+  handle('marketplace:search', (query) => marketplace.search(query));
+  handle('marketplace:install', (extensionId, version) => marketplace.install(extensionId, version));
   handle('extension:source', (extensionId) => store.extensionSource(extensionId));
   handle('extension:resource', (extensionId, fileName) => store.extensionResource(extensionId, fileName));
   handle('extension:enable', (extensionId, enabled, permissions) => store.setExtensionEnabled(extensionId, enabled, permissions));
@@ -103,6 +108,7 @@ app.whenReady().then(() => {
   app.setName('omniNote');
   const workspacePath = process.env.WHITEBOARD_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   store = new WorkspaceStore(workspacePath);
+  marketplace = new Marketplace(store, process.env.OMNINOTE_MARKETPLACE_URL || distribution.marketplaceUrl, { allowHttpLoopback: !app.isPackaged });
   const exampleSource = path.join(projectRoot, 'examples', 'date-insert');
   const exampleDestination = path.join(store.extensionDir, 'whiteboard.date-insert');
   if (!fs.existsSync(exampleDestination)) fs.cpSync(exampleSource, exampleDestination, { recursive: true });
