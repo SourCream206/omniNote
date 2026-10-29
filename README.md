@@ -32,6 +32,8 @@ Local extensions live in the workspace's `extensions/` directory. The bundled `w
 
 ## Current limits and testing
 
+The Windows launcher and installer/update scaffold are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). Updates target your public GitHub Releases. No update release is published yet.
+
 This is a source-run test version, not an installer. PDF previews and printouts display the first 50 pages; XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. DOCX printouts reflect the built-in renderer and may differ from Word pagination. Audio/video playback depends on Chromium's codec support; **Open original** uses the default local app. Link support depends on each previewer and should be checked against real documents. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 
 The M0 ink lab needs feedback on your actual stylus and device. Check pressure, tilt, palm rejection, eraser button, and perceived latency. See [docs/PLAN.md](docs/PLAN.md) for architecture and milestone gates and [docs/VERSIONS.md](docs/VERSIONS.md) for runnable version checks.

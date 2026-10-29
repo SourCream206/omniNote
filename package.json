@@ -9,8 +9,10 @@
     "start": "npm run build && electron .",
     "ink-lab": "tsc -p tsconfig.json && electron . --ink-lab",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
-    "test": "node scripts/test-storage.cjs && node scripts/document-fixtures.cjs && node scripts/test-protocol.cjs && node scripts/test-marketplace.cjs",
-    "marketplace:example": "node scripts/build-marketplace-example.cjs"
+    "test": "node scripts/test-storage.cjs && node scripts/document-fixtures.cjs && node scripts/test-protocol.cjs && node scripts/test-marketplace.cjs && node scripts/test-distribution.cjs",
+    "marketplace:example": "node scripts/build-marketplace-example.cjs",
+    "pack:win": "npm run build && electron-builder --config electron-builder.config.cjs --dir --win --publish never",
+    "dist:win": "node scripts/check-release-config.cjs && npm run build && electron-builder --config electron-builder.config.cjs --win nsis --publish never"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -18,6 +20,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "45.0.0",
+    "electron-builder": "^26.18.0",
     "typescript": "5.9.3",
     "vite": "^8.3.5"
   },
@@ -31,6 +34,7 @@
     "@tiptap/starter-kit": "^3.32.0",
     "docx-preview": "^0.4.1",
     "dompurify": "^3.4.17",
+    "electron-updater": "^6.8.11",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
     "lucide-react": "^1.61.0",

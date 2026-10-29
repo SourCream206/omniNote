@@ -30,6 +30,7 @@ export interface ExtensionManifest {
 export interface ExtensionInfo { manifest: ExtensionManifest; enabled: boolean; grantedPermissions: string[]; settings: Record<string, boolean | string> }
 export interface MarketplaceEntry { id: string; name: string; summary: string; version: string; apiVersion: string; permissions: string[] }
 export interface MarketplaceSearch { configured: boolean; entries: MarketplaceEntry[] }
+export interface UpdateStatus { state: 'unavailable' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'ignored' | 'up-to-date' | 'error'; message: string; version?: string }
 
 export interface WhiteboardBridge {
   load(): Promise<Snapshot>;
@@ -59,6 +60,10 @@ export interface WhiteboardBridge {
   exportWorkspace(): Promise<boolean>;
   exportPagePdf(): Promise<boolean>;
   setFullScreen(enabled: boolean): Promise<void>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  checkForUpdates(): Promise<UpdateStatus>;
+  promptToInstallUpdate(): Promise<UpdateStatus>;
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
 }
 
 declare global { interface Window { whiteboard: WhiteboardBridge } }

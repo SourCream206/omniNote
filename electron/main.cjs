@@ -1,4 +1,5 @@
 const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, net, protocol, session, shell } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -6,7 +7,7 @@ const { WorkspaceStore } = require('./storage.cjs');
 const { createWorkspaceArchive } = require('./export.cjs');
 const { resolveAppFile } = require('./protocol-path.cjs');
 const { Marketplace } = require('./marketplace.cjs');
-const distribution = require('../distribution.json');
+const { config: distribution, hasUpdateSource } = require('./distribution.cjs');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -15,7 +16,56 @@ protocol.registerSchemesAsPrivileged([
 let store;
 let window;
 let marketplace;
+let updateStatus = { state: 'unavailable', message: 'Updates require an installed release with a configured update address.' };
+let ignoredUpdateVersion = null;
+let installAfterDownload = false;
 const projectRoot = path.resolve(__dirname, '..');
+const updatePreferencesPath = path.join(app.getPath('appData'), 'omniNote', 'update-preferences.json');
+
+try {
+  const saved = JSON.parse(fs.readFileSync(updatePreferencesPath, 'utf8'));
+  if (typeof saved.ignoredVersion === 'string') ignoredUpdateVersion = saved.ignoredVersion;
+} catch (error) {
+  if (error.code !== 'ENOENT') console.warn('Could not read update preferences:', error.message);
+}
+
+function ignoreUpdateVersion(version) {
+  ignoredUpdateVersion = version;
+  fs.mkdirSync(path.dirname(updatePreferencesPath), { recursive: true });
+  const temporary = `${updatePreferencesPath}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify({ ignoredVersion: version }));
+  fs.renameSync(temporary, updatePreferencesPath);
+}
+
+function setUpdateStatus(state, message, version) {
+  updateStatus = { state, message, ...(version ? { version } : {}) };
+  if (window && !window.isDestroyed()) window.webContents.send('updates:status', updateStatus);
+}
+
+function configureUpdates() {
+  if (!app.isPackaged || !hasUpdateSource(distribution)) return;
+  setUpdateStatus('idle', 'Ready to check for updates.');
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on('checking-for-update', () => setUpdateStatus('checking', 'Checking for updates…'));
+  autoUpdater.on('update-available', (info) => {
+    if (info.version === ignoredUpdateVersion) setUpdateStatus('ignored', `Version ${info.version} was ignored.`, info.version);
+    else setUpdateStatus('available', `Version ${info.version} is available.`, info.version);
+  });
+  autoUpdater.on('download-progress', (progress) => setUpdateStatus('downloading', `Downloading update… ${Math.round(progress.percent)}%`));
+  autoUpdater.on('update-not-available', () => setUpdateStatus('up-to-date', 'You have the latest version.'));
+  autoUpdater.on('error', (error) => {
+    installAfterDownload = false;
+    setUpdateStatus('error', error.message);
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    setUpdateStatus('downloaded', `Version ${info.version} is ready to install.`, info.version);
+    if (installAfterDownload) autoUpdater.quitAndInstall();
+  });
+  const check = () => autoUpdater.checkForUpdates().catch((error) => setUpdateStatus('error', error.message));
+  setTimeout(check, 15000);
+  setInterval(check, 24 * 60 * 60 * 1000);
+}
 
 function registerIpc() {
   const handle = (name, action) => ipcMain.handle(name, (event, ...args) => {
@@ -40,6 +90,34 @@ function registerIpc() {
   handle('window:full-screen', (enabled) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid fullscreen state');
     window.setFullScreen(enabled);
+  });
+  handle('updates:status', () => updateStatus);
+  handle('updates:check', async () => {
+    if (!app.isPackaged || !hasUpdateSource(distribution)) return updateStatus;
+    await autoUpdater.checkForUpdates();
+    return updateStatus;
+  });
+  handle('updates:prompt', async () => {
+    if (!['available', 'downloaded'].includes(updateStatus.state) || !updateStatus.version) return updateStatus;
+    const version = updateStatus.version;
+    const choice = await dialog.showMessageBox(window, {
+      type: 'question', title: 'omniNote update', message: `Install omniNote ${version}?`,
+      detail: 'Your notes stay on this computer. The app will restart after downloading the update.',
+      buttons: ['Yes', 'Ignore', 'Cancel'], defaultId: 0, cancelId: 2, noLink: true,
+    });
+    if (choice.response === 1) {
+      ignoreUpdateVersion(version);
+      setUpdateStatus('ignored', `Version ${version} was ignored.`, version);
+    } else if (choice.response === 0) {
+      if (updateStatus.state === 'downloaded') autoUpdater.quitAndInstall();
+      else {
+        installAfterDownload = true;
+        setUpdateStatus('downloading', `Downloading version ${version}…`, version);
+        try { await autoUpdater.downloadUpdate(); }
+        catch (error) { installAfterDownload = false; setUpdateStatus('error', error.message); }
+      }
+    }
+    return updateStatus;
   });
   handle('asset:import', (name, mimeType, bytes) => store.importAsset(name, mimeType, bytes));
   handle('asset:read', (assetId) => store.readAsset(assetId));
@@ -104,6 +182,10 @@ function registerIpc() {
   });
 }
 
+const stableUserData = path.join(app.getPath('appData'), 'omniNote');
+fs.mkdirSync(stableUserData, { recursive: true });
+app.setPath('userData', stableUserData);
+
 app.whenReady().then(() => {
   app.setName('omniNote');
   const workspacePath = process.env.WHITEBOARD_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
@@ -126,6 +208,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^https?:/i.test(details.url) }));
   registerIpc();
+  configureUpdates();
 
   window = new BrowserWindow({
     width: 1500, height: 930, minWidth: 1000, minHeight: 680, show: false,

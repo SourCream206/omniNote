@@ -1,4 +1,6 @@
 {
   "marketplaceUrl": "",
-  "updateUrl": ""
+  "updateUrl": "",
+  "githubRepository": "SourCream206/omniNote",
+  "githubPrivate": false
 }

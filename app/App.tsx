@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2 } from 'lucide-react';
-import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode } from './types';
+import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 import MarketplacePanel from './MarketplacePanel';
 import { readTheme, themes, type ThemeId } from './theme';
@@ -26,6 +26,7 @@ export default function App() {
   const [insertOpen, setInsertOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.min(380, Math.max(190, Number(localStorage.getItem('omninote.sidebarWidth')) || 230)));
   const [toast, setToast] = useState('');
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'unavailable', message: 'Updates are available in installed releases.' });
   const canvasRef = useRef<CanvasHandle>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
@@ -50,6 +51,12 @@ export default function App() {
       setExpanded(new Set(data.nodes.filter((node) => node.kind !== 'page').map((node) => node.id)));
     }).catch((error) => setToast(String(error)));
   }, [refresh, refreshExtensions]);
+
+  useEffect(() => {
+    const unsubscribe = window.whiteboard.onUpdateStatus(setUpdateStatus);
+    window.whiteboard.getUpdateStatus().then(setUpdateStatus).catch(notifyError);
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -252,6 +259,16 @@ export default function App() {
     } catch (error) { notifyError(error); }
   }
 
+  async function promptUpdate() {
+    try { setUpdateStatus(await window.whiteboard.promptToInstallUpdate()); }
+    catch (error) { notifyError(error); }
+  }
+
+  async function checkUpdates() {
+    try { setUpdateStatus(await window.whiteboard.checkForUpdates()); }
+    catch (error) { notifyError(error); }
+  }
+
   if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
   const paperStyle = snapshot.pages.find((row) => row.id === pageId)?.paper_style ?? 'blank';
 
@@ -264,7 +281,7 @@ export default function App() {
     </header>
 
     <div className="app-body">
-      <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button><button className={`settings-trigger ${activePanel === 'settings' ? 'active' : ''}`} title="Settings" aria-label="Settings" aria-expanded={activePanel === 'settings'} onClick={() => setActivePanel((panel) => panel === 'settings' ? null : 'settings')}><Settings2 size={20} /></button></nav>
+      <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button>{['available', 'downloaded'].includes(updateStatus.state) && <button className="update-trigger" title={`Install omniNote ${updateStatus.version ?? 'update'}`} aria-label={`Install update ${updateStatus.version ?? ''}`} onClick={promptUpdate}><Download size={19} /><span className="update-dot" /></button>}<button className={`settings-trigger ${activePanel === 'settings' ? 'active' : ''}`} title="Settings" aria-label="Settings" aria-expanded={activePanel === 'settings'} onClick={() => setActivePanel((panel) => panel === 'settings' ? null : 'settings')}><Settings2 size={20} /></button></nav>
       {activePanel && <aside className="notebook-sidebar" aria-label={activePanel === 'explorer' ? 'Explorer' : activePanel === 'extensions' ? 'Extensions' : 'Settings'} style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
@@ -274,7 +291,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} />}
+        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} updateStatus={updateStatus} onCheckUpdates={checkUpdates} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
@@ -308,7 +325,7 @@ function ExtensionsPanel({ directory, extensions, onToggle, onSetting, onSearch,
   </div>;
 }
 
-function SettingsPanel({ theme, onThemeChange }: { theme: ThemeId; onThemeChange(value: ThemeId): void }) {
+function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates }: { theme: ThemeId; onThemeChange(value: ThemeId): void; updateStatus: UpdateStatus; onCheckUpdates(): void }) {
   return <div className="settings-panel">
     <div className="sidebar-title"><span>SETTINGS</span></div>
     <div className="settings-scroll">
@@ -329,6 +346,9 @@ function SettingsPanel({ theme, onThemeChange }: { theme: ThemeId; onThemeChange
         </button>)}
       </div>
       <p className="settings-hint">Themes change the workspace. Page paper stays light so existing ink and documents remain easy to read.</p>
+      <div className="settings-section-heading settings-update-heading">Updates</div>
+      <p className="settings-update-status" role="status">{updateStatus.message}</p>
+      <button className="settings-check-update" disabled={['unavailable', 'checking', 'downloading'].includes(updateStatus.state)} onClick={onCheckUpdates}>Check for updates</button>
     </div>
   </div>;
 }

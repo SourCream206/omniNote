@@ -249,6 +249,9 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .app-shell, .loading-screen { background:var(--ui-bg); color:var(--ui-text); }
 .activity-rail { background:var(--ui-rail); border-color:var(--ui-line); }
 .activity-rail .settings-trigger { margin-top:auto; }
+.activity-rail .update-trigger { position:relative; margin-top:auto; color:var(--ui-accent); }
+.activity-rail .update-trigger + .settings-trigger { margin-top:0; }
+.update-dot { position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--ui-accent); }
 .activity-rail button { color:var(--ui-muted); }
 .activity-rail button:hover, .activity-rail button.active { background:var(--ui-selected); color:var(--ui-accent); }
 .app-header, .notebook-sidebar, .canvas-toolbar, .rich-toolbar, .canvas-shell, .modal { background:var(--ui-surface); border-color:var(--ui-line); color:var(--ui-text); }
@@ -311,6 +314,11 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .theme-preview-warm { background:#f6f1e9; }.theme-preview-warm i:nth-child(1) { background:#f0e9de; }.theme-preview-warm i:nth-child(2) { background:#fffaf2; }.theme-preview-warm i:nth-child(3) { background:#fffdf8; }
 .theme-preview-sage { background:#f0f5f1; }.theme-preview-sage i:nth-child(1) { background:#e7f0e9; }.theme-preview-sage i:nth-child(2) { background:#fbfefa; }.theme-preview-sage i:nth-child(3) { background:#fffefb; }
 .settings-hint { margin:16px 3px 0; line-height:1.45; font-size:10px; }
+.settings-update-heading { margin-top:28px; margin-bottom:10px; }
+.settings-update-status { margin:0 3px 10px; color:var(--ui-muted); font-size:11px; line-height:1.45; }
+.settings-check-update { margin:0 3px; padding:7px 10px; border:1px solid var(--ui-line); border-radius:5px; background:var(--ui-surface); color:var(--ui-text); font-size:11px; }
+.settings-check-update:hover:not(:disabled) { background:var(--ui-hover); color:var(--ui-accent); }
+.settings-check-update:disabled { opacity:.5; cursor:default; }
 .marketplace-section-label, .marketplace-section h3 { margin:0; padding:10px 13px 8px; color:var(--ui-muted); font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
 .marketplace-section { border-top:1px solid var(--ui-line); }
 .marketplace-entry { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border-top:1px solid var(--ui-line); }
