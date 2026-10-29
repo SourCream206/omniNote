@@ -4,6 +4,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { WorkspaceStore } = require('./storage.cjs');
 const { createWorkspaceArchive } = require('./export.cjs');
+const { resolveAppFile } = require('./protocol-path.cjs');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -25,6 +26,13 @@ function registerIpc() {
   handle('node:delete', (nodeId) => store.deleteNode(nodeId));
   handle('node:move', (nodeId, parentId, beforeId) => store.moveNode(nodeId, parentId, beforeId));
   handle('page:save', (pageId, objects, camera) => store.savePage(pageId, objects, camera));
+  ipcMain.on('page:save-sync', (event, pageId, objects, camera) => {
+    try {
+      if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Invalid IPC sender');
+      store.savePage(pageId, objects, camera);
+      event.returnValue = { ok: true };
+    } catch (error) { event.returnValue = { error: error instanceof Error ? error.message : String(error) }; }
+  });
   handle('page:style', (pageId, style) => store.setPageStyle(pageId, style));
   handle('window:full-screen', (enabled) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid fullscreen state');
@@ -104,12 +112,8 @@ app.whenReady().then(() => {
   }
 
   protocol.handle('whiteboard', (request) => {
-    const url = new URL(request.url);
-    if (url.hostname !== 'app') return new Response('Not found', { status: 404 });
-    const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-    if (!relative.startsWith('dist-ui/') && !['ink-lab.html', 'src/spike.css', 'dist/spike.js'].includes(relative)) return new Response('Not found', { status: 404 });
-    const absolute = path.resolve(projectRoot, relative);
-    if (!absolute.startsWith(projectRoot + path.sep)) return new Response('Not found', { status: 404 });
+    const absolute = resolveAppFile(projectRoot, request.url);
+    if (!absolute) return new Response('Not found', { status: 404 });
     return net.fetch(pathToFileURL(absolute).toString());
   });
 
@@ -134,4 +138,4 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', () => store?.close());
+app.on('will-quit', () => store?.close());

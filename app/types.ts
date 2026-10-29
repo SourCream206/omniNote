@@ -36,6 +36,7 @@ export interface WhiteboardBridge {
   deleteNode(nodeId: string): Promise<void>;
   moveNode(nodeId: string, parentId: string | null, beforeId?: string | null): Promise<void>;
   savePage(pageId: string, objects: CanvasObject[], camera: Camera): Promise<void>;
+  savePageSync(pageId: string, objects: CanvasObject[], camera: Camera): void;
   setPageStyle(pageId: string, style: PaperStyle): Promise<void>;
   importAsset(name: string, mimeType: string, bytes: Uint8Array): Promise<Asset>;
   pickAssets(): Promise<Asset[]>;

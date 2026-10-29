@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   deleteNode: (nodeId) => invoke('node:delete', nodeId),
   moveNode: (nodeId, parentId, beforeId) => invoke('node:move', nodeId, parentId, beforeId),
   savePage: (pageId, objects, camera) => invoke('page:save', pageId, objects, camera),
+  savePageSync: (pageId, objects, camera) => {
+    const result = ipcRenderer.sendSync('page:save-sync', pageId, objects, camera);
+    if (result?.error) throw new Error(result.error);
+    if (result?.ok !== true) throw new Error('Page save did not complete');
+  },
   setPageStyle: (pageId, style) => invoke('page:style', pageId, style),
   importAsset: (name, mimeType, bytes) => invoke('asset:import', name, mimeType, bytes),
   pickAssets: () => invoke('asset:pick'),

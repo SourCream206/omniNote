@@ -311,5 +311,7 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .theme-preview-warm { background:#f6f1e9; }.theme-preview-warm i:nth-child(1) { background:#f0e9de; }.theme-preview-warm i:nth-child(2) { background:#fffaf2; }.theme-preview-warm i:nth-child(3) { background:#fffdf8; }
 .theme-preview-sage { background:#f0f5f1; }.theme-preview-sage i:nth-child(1) { background:#e7f0e9; }.theme-preview-sage i:nth-child(2) { background:#fbfefa; }.theme-preview-sage i:nth-child(3) { background:#fffefb; }
 .settings-hint { margin:16px 3px 0; line-height:1.45; font-size:10px; }
+.tree-item:focus-within .tree-more { display:flex; }
+@media (pointer:coarse) { .tree-item .tree-more { display:flex; } }
 @media (pointer:coarse) { .activity-rail .settings-trigger { margin-top:auto; } .theme-option { min-height:48px; } }
 @media print { :root[data-theme=midnight] { color-scheme:light; } body, .app-shell, .editor-area, .canvas-shell, .canvas-viewport { background:#fff !important; color:#263244 !important; } }

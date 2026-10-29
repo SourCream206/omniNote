@@ -13,7 +13,7 @@ import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
@@ -124,6 +124,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const penLastSeen = useRef(-Infinity);
   const spaceHeld = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editRevision = useRef(0);
+  const savedRevision = useRef(0);
 
   const updateObjects = (next: CanvasObject[]) => { objectsRef.current = next; setObjects(next); scheduleSave(next, cameraRef.current); };
   const updateCamera = (next: Camera) => { cameraRef.current = next; setCamera(next); scheduleSave(objectsRef.current, next); };
@@ -131,19 +133,48 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const updateTool = (next: CanvasTool) => { toolRef.current = next; setTool(next); setActiveDoc(null); if (next !== 'select') updateSelected([]); };
 
   function scheduleSave(nextObjects: CanvasObject[], nextCamera: Camera) {
+    const revision = ++editRevision.current;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      window.whiteboard.savePage(page.id, nextObjects, nextCamera).then(() => onObjectsChange(page.id, nextObjects, nextCamera)).catch(onError);
+      saveTimer.current = null;
+      window.whiteboard.savePage(page.id, nextObjects, nextCamera).then(() => {
+        savedRevision.current = Math.max(savedRevision.current, revision);
+        if (revision === editRevision.current) onObjectsChange(page.id, nextObjects, nextCamera);
+      }).catch(onError);
     }, 400);
+  }
+
+  function flushPendingSave(): Promise<void> {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const revision = editRevision.current;
+    if (revision <= savedRevision.current) return Promise.resolve();
+    const latestObjects = objectsRef.current;
+    const latestCamera = cameraRef.current;
+    return window.whiteboard.savePage(page.id, latestObjects, latestCamera).then(() => {
+      savedRevision.current = Math.max(savedRevision.current, revision);
+      if (revision === editRevision.current) onObjectsChange(page.id, latestObjects, latestCamera);
+    });
   }
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => setViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height }));
     if (viewport.current) observer.observe(viewport.current);
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (editRevision.current <= savedRevision.current) return;
+      try {
+        window.whiteboard.savePageSync(page.id, objectsRef.current, cameraRef.current);
+        savedRevision.current = editRevision.current;
+      } catch (error) {
+        event.preventDefault();
+        event.returnValue = false;
+        onError(error);
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
     return () => {
       observer.disconnect();
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      window.whiteboard.savePage(page.id, objectsRef.current, cameraRef.current).catch(onError);
+      window.removeEventListener('beforeunload', beforeUnload);
+      void flushPendingSave().catch(onError);
     };
     // Canvas is keyed by page ID; cleanup flushes its latest state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,7 +283,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'extension', x: center.x - 180, y: center.y - 120, width: 360, height: 240, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { extensionId, objectType, data } };
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
   }
-  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject }), [page.id]);
+  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject, flushPendingSave }), [page.id]);
 
   function screen(event: { clientX: number; clientY: number }): Point { const rect = viewport.current!.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
   function world(point: Point, cam = cameraRef.current): Point { return { x: (point.x - cam.x) / cam.zoom, y: (point.y - cam.y) / cam.zoom }; }
@@ -282,9 +313,9 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       if (performance.now() - penLastSeen.current < 700) return;
       touches.current.set(event.pointerId, screen(event.nativeEvent));
       if (touches.current.size === 2) {
+        cancelCurrentGesture();
         const points = [...touches.current.values()];
         pinch.current = { distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y), center: { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }, camera: cameraRef.current };
-        gesture.current = null;
         viewport.current?.setPointerCapture(event.pointerId);
         return;
       }
@@ -364,6 +395,23 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       setLasso([]);
     } else if (['move','resize','erase'].includes(current.kind)) record(current.objects);
     gesture.current = null;
+    try { viewport.current?.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  }
+
+  function cancelCurrentGesture() {
+    const current = gesture.current;
+    if (!current) return;
+    if (current.kind === 'pan') updateCamera(current.camera);
+    if (['move', 'resize', 'erase'].includes(current.kind)) updateObjects(current.objects);
+    setInk(null);
+    setLasso([]);
+    gesture.current = null;
+  }
+
+  function onPointerCancel(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'touch') { touches.current.delete(event.pointerId); if (touches.current.size < 2) pinch.current = null; }
+    if (gesture.current?.pointerId !== event.pointerId) return;
+    cancelCurrentGesture();
     try { viewport.current?.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   }
 
@@ -509,7 +557,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>}
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
-    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point: screen(event.nativeEvent), objectId: object?.id ?? null }); setAttachmentMenuId(null); setActionsOpen(false); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
+    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point: screen(event.nativeEvent), objectId: object?.id ?? null }); setAttachmentMenuId(null); setActionsOpen(false); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'extension' || (object.type === 'document' && !fileNeedsTile(object, extensions))) && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && !fileNeedsTile(object, extensions) && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}

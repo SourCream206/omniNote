@@ -24,7 +24,7 @@ npm start
 - Use **Paper** on each page to choose Blank, Dots, Grid, or Lines. New pages start blank; existing workspaces keep their dotted pages when upgraded. The paper style is saved with the page and follows pan and zoom.
 - The window opens maximized. Use **Canvas full screen** on the toolbar to fill the display with the canvas; **Tools** reveals the toolbar in that mode, and **Exit full screen** returns to the notebook layout.
 - Open **Settings** from the gear at the bottom of the activity rail to choose Classic Light, Midnight, Warm Paper, or Sage. The choice is saved on this machine. Themes change the workspace chrome while page paper stays light for existing ink and embedded documents.
-- The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets) and a PDF of the current visible page view. Test restores by extracting the ZIP into an empty workspace directory with the app closed.
+- The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets) and a PDF of the current visible page view. Pending canvas edits are saved before a backup starts and when the window closes. Test restores by extracting the ZIP into an empty workspace directory with the app closed.
 
 ## Extensions
 
