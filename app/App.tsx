@@ -7,6 +7,24 @@ import DocumentPage from './DocumentPage';
 import { readTheme, themes, type ThemeId } from './theme';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
+type TreeDrop = { id: string; placement: 'before' | 'after' | 'inside'; parentId: string | null; beforeId: string | null };
+type TabDrop = { pane: 0 | 1; targetId: string | null; edge: 'before' | 'after'; split: boolean };
+const allowedTreeParent: Record<NodeKind, (NodeKind | null)[]> = { notebook: [null], folder: ['notebook', 'folder'], section: ['notebook', 'folder'], page: ['section'] };
+function treeDropFor(nodes: TreeNode[], sourceId: string, targetId: string, pointerY: number, row: HTMLElement): TreeDrop | null {
+  const source = nodes.find((item) => item.id === sourceId);
+  const target = nodes.find((item) => item.id === targetId);
+  if (!source || !target || source.id === target.id) return null;
+  const ratio = (pointerY - row.getBoundingClientRect().top) / row.getBoundingClientRect().height;
+  const placement = allowedTreeParent[source.kind].includes(target.kind) && ratio >= 0.25 && ratio <= 0.75 ? 'inside' : ratio < 0.5 ? 'before' : 'after';
+  const parentId = placement === 'inside' ? target.id : target.parent_id;
+  const parent = nodes.find((item) => item.id === parentId);
+  if (!allowedTreeParent[source.kind].includes(parent?.kind ?? null)) return null;
+  let cursor = parentId;
+  while (cursor) { if (cursor === sourceId) return null; cursor = nodes.find((item) => item.id === cursor)?.parent_id ?? null; }
+  const siblings = childrenOf(nodes, parentId);
+  const afterId = siblings[siblings.findIndex((item) => item.id === target.id) + 1]?.id ?? null;
+  return { id: target.id, placement, parentId, beforeId: placement === 'inside' ? null : placement === 'before' ? target.id : afterId };
+}
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
 const paperChoices: { style: PaperStyle; label: string }[] = [{ style: 'blank', label: 'Blank' }, { style: 'dots', label: 'Dots' }, { style: 'grid', label: 'Grid' }, { style: 'lines', label: 'Lines' }];
 
@@ -22,7 +40,9 @@ export default function App() {
   const [activePane, setActivePane] = useState<0 | 1>(0);
   const [maximized, setMaximized] = useState(true);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
-  const [tabDropPane, setTabDropPane] = useState<0 | 1 | null>(null);
+  const [tabDrop, setTabDrop] = useState<TabDrop | null>(null);
+  const [tabGhost, setTabGhost] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [treeDrag, setTreeDrag] = useState<{ id: string; target: TreeDrop | null; x: number; y: number } | null>(null);
   const [annotationPages, setAnnotationPages] = useState<Set<string>>(new Set());
   const [pendingAnnotation, setPendingAnnotation] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
@@ -45,6 +65,8 @@ export default function App() {
   const insertRef = useRef<HTMLDivElement>(null);
   const tabPointer = useRef<{ id: string; pane: 0 | 1; x: number; y: number } | null>(null);
   const suppressTabClick = useRef(false);
+  const treePointer = useRef<{ id: string; x: number; y: number } | null>(null);
+  const suppressTreeClick = useRef(false);
   const annotationInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -120,44 +142,51 @@ export default function App() {
   }, [pendingAnnotation, snapshot, pageId, splitPageId]);
 
   useEffect(() => {
-    const destinationFor = (event: PointerEvent): 0 | 1 | null => {
+    const destinationFor = (event: PointerEvent): TabDrop | null => {
       const target = document.elementFromPoint(event.clientX, event.clientY);
       const editor = target?.closest<HTMLElement>('.editor-area');
       if (!editor) return null;
-      const tabStrip = target?.closest<HTMLElement>('.page-tabs')?.dataset.pane;
-      if (tabStrip === '0' || tabStrip === '1') return Number(tabStrip) as 0 | 1;
-      if (!rightTabs.length && event.clientX > editor.getBoundingClientRect().left + editor.clientWidth * 0.55) return 1;
+      const tabStrip = target?.closest<HTMLElement>('.page-tabs');
+      const tabPane = tabStrip?.dataset.pane;
+      if (tabPane === '0' || tabPane === '1') {
+        const tab = target?.closest<HTMLElement>('.page-tab');
+        const edge = tab && event.clientX < tab.getBoundingClientRect().left + tab.clientWidth / 2 ? 'before' : 'after';
+        return { pane: Number(tabPane) as 0 | 1, targetId: tab?.dataset.pageId ?? null, edge, split: false };
+      }
+      if (!rightTabs.length && event.clientX > editor.getBoundingClientRect().left + editor.clientWidth * 0.55) return { pane: 1, targetId: null, edge: 'after', split: true };
       const pane = target?.closest<HTMLElement>('[data-pane]')?.dataset.pane;
-      return pane === '0' || pane === '1' ? Number(pane) as 0 | 1 : null;
+      return pane === '0' || pane === '1' ? { pane: Number(pane) as 0 | 1, targetId: null, edge: 'after', split: false } : null;
     };
     const previewTabMove = (event: PointerEvent) => {
       const source = tabPointer.current;
-      if (source && Math.hypot(event.clientX - source.x, event.clientY - source.y) >= 10) setTabDropPane(destinationFor(event));
+      if (source && Math.hypot(event.clientX - source.x, event.clientY - source.y) >= 8) {
+        setTabDrop(destinationFor(event));
+        setTabGhost({ id: source.id, x: event.clientX, y: event.clientY });
+      }
     };
     const finishTabMove = (event: PointerEvent) => {
       const source = tabPointer.current;
       tabPointer.current = null;
-      setTabDropPane(null);
-      if (!source || Math.hypot(event.clientX - source.x, event.clientY - source.y) < 10) return;
+      setTabDrop(null);
+      setTabGhost(null);
+      if (!source || Math.hypot(event.clientX - source.x, event.clientY - source.y) < 8) return;
       suppressTabClick.current = true;
       window.setTimeout(() => { suppressTabClick.current = false; }, 0);
-      const target = document.elementFromPoint(event.clientX, event.clientY);
-      const targetTab = target?.closest<HTMLElement>('.page-tab')?.dataset.pageId;
       const destination = destinationFor(event);
       if (destination === null) return;
-      if (source.pane === destination && targetTab === source.id) return;
+      if (source.pane === destination.pane && destination.targetId === source.id) return;
       const sourceTabs = source.pane === 0 ? openTabs : rightTabs;
-      const destTabs = destination === 0 ? openTabs : rightTabs;
+      const destTabs = destination.pane === 0 ? openTabs : rightTabs;
       const nextSource = sourceTabs.filter((id) => id !== source.id);
-      const nextDest = destination === source.pane ? nextSource : [...destTabs];
-      const position = targetTab ? nextDest.indexOf(targetTab) : -1;
-      nextDest.splice(position < 0 ? nextDest.length : position, 0, source.id);
-      if (source.pane === destination) destination === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest);
-      else { source.pane === 0 ? setOpenTabs(nextSource) : setRightTabs(nextSource); destination === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest); }
-      if (source.pane === 0 && destination === 1) setPageId(nextSource.includes(pageId ?? '') ? pageId : nextSource[0] ?? null);
-      if (source.pane === 1 && destination === 0) setSplitPageId(nextSource.includes(splitPageId ?? '') ? splitPageId : nextSource[0] ?? null);
-      if (destination === 0) setPageId(source.id); else setSplitPageId(source.id);
-      setActivePane(destination);
+      const nextDest = destination.pane === source.pane ? nextSource : [...destTabs];
+      const position = destination.targetId ? nextDest.indexOf(destination.targetId) : -1;
+      nextDest.splice(position < 0 ? nextDest.length : position + (destination.edge === 'after' ? 1 : 0), 0, source.id);
+      if (source.pane === destination.pane) destination.pane === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest);
+      else { source.pane === 0 ? setOpenTabs(nextSource) : setRightTabs(nextSource); destination.pane === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest); }
+      if (source.pane === 0 && destination.pane === 1) setPageId(nextSource.includes(pageId ?? '') ? pageId : nextSource[0] ?? null);
+      if (source.pane === 1 && destination.pane === 0) setSplitPageId(nextSource.includes(splitPageId ?? '') ? splitPageId : nextSource[0] ?? null);
+      if (destination.pane === 0) setPageId(source.id); else setSplitPageId(source.id);
+      setActivePane(destination.pane);
     };
     document.addEventListener('pointermove', previewTabMove);
     document.addEventListener('pointerup', finishTabMove);
@@ -200,6 +229,33 @@ export default function App() {
   const activePageId = activePane === 1 && splitPageId ? splitPageId : pageId;
   const page = nodes.find((node) => node.id === activePageId && node.kind === 'page') ?? null;
   const section = nodes.find((node) => node.id === sectionId && node.kind === 'section') ?? null;
+
+  useEffect(() => {
+    const targetFor = (event: PointerEvent): TreeDrop | null => {
+      const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.tree-item[data-node-id]');
+      return row && treePointer.current ? treeDropFor(nodes, treePointer.current.id, row.dataset.nodeId!, event.clientY, row) : null;
+    };
+    const onMove = (event: PointerEvent) => {
+      const source = treePointer.current;
+      if (source && Math.hypot(event.clientX - source.x, event.clientY - source.y) >= 6) setTreeDrag({ id: source.id, target: targetFor(event), x: event.clientX, y: event.clientY });
+    };
+    const onEnd = (event: PointerEvent) => {
+      const source = treePointer.current;
+      const target = targetFor(event);
+      treePointer.current = null;
+      setTreeDrag(null);
+      if (!source || Math.hypot(event.clientX - source.x, event.clientY - source.y) < 6) return;
+      suppressTreeClick.current = true;
+      window.setTimeout(() => { suppressTreeClick.current = false; }, 0);
+      if (target) {
+        if (target.placement === 'inside' && target.parentId) setExpanded((before) => new Set([...before, target.parentId!]));
+        void moveNode(source.id, target.parentId, target.beforeId);
+      }
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    return () => { document.removeEventListener('pointermove', onMove); document.removeEventListener('pointerup', onEnd); };
+  }, [nodes]);
 
   const notifyError = (error: unknown) => setToast(error instanceof Error ? error.message : String(error));
 
@@ -256,7 +312,11 @@ export default function App() {
   }
 
   async function moveNode(nodeId: string, parentId: string | null, beforeId?: string | null) {
-    try { await window.whiteboard.moveNode(nodeId, parentId, beforeId); await refresh(); }
+    try {
+      await window.whiteboard.moveNode(nodeId, parentId, beforeId);
+      if (nodeId === activePageId) setSectionId(parentId);
+      await refresh();
+    }
     catch (error) { notifyError(error); }
   }
 
@@ -282,6 +342,7 @@ export default function App() {
   }
 
   function openPage(targetId: string | null, parentId: string | null) {
+    if (!targetId) { setSectionId(parentId); return; }
     if (targetId && targetId === pageId) setActivePane(0);
     else if (targetId && openTabs.includes(targetId)) { setPageId(targetId); setActivePane(0); }
     else if (targetId && rightTabs.includes(targetId)) { setSplitPageId(targetId); setActivePane(1); }
@@ -410,7 +471,7 @@ export default function App() {
     const panePage = nodes.find((node) => node.id === id && node.kind === 'page');
     const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
     const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
-    return <div className={`editor-pane ${activePane === pane ? 'active' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
+    return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
       {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
     </div>;
   };
@@ -421,14 +482,15 @@ export default function App() {
       {ids.map((id) => {
         const tab = nodes.find((node) => node.id === id && node.kind === 'page');
         if (!tab) return null;
-        return <div key={tab.id} data-page-id={tab.id} className={`page-tab ${selectedId === tab.id ? 'active' : ''}`} role="tab" aria-selected={selectedId === tab.id} tabIndex={0}
+        return <div key={tab.id} data-page-id={tab.id} className={`page-tab ${selectedId === tab.id ? 'active' : ''} ${selectedId === tab.id && activePane === pane ? 'focused' : ''} ${tabGhost && tabDrop?.pane === pane && tabDrop.targetId === tab.id ? `drop-${tabDrop.edge}` : ''}`} role="tab" aria-selected={selectedId === tab.id} tabIndex={0}
           onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button')) { tabPointer.current = { id: tab.id, pane, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); } }}
-          onPointerCancel={() => { tabPointer.current = null; setTabDropPane(null); }}
+          onPointerCancel={() => { tabPointer.current = null; setTabDrop(null); setTabGhost(null); }}
           onClick={() => { if (suppressTabClick.current) return; pane === 0 ? setPageId(tab.id) : setSplitPageId(tab.id); setActivePane(pane); setSectionId(tab.parent_id); }}
           onDoubleClick={() => renameNode(tab)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>
           {snapshot.documentPages.some((item) => item.page_id === tab.id) ? <FileIcon size={14} /> : <FileText size={14} />}<span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id, pane); }}><X size={13} /></button>
         </div>;
       })}
+      {tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split && <span className="tab-drop-end" aria-hidden="true" />}
       {pane === 0 ? <button className="split-tab-button" title="Move current page to the right" aria-label="Move current page to the right" disabled={!pageId} onClick={() => pageId && splitTab(pageId)}><PanelRight size={16} /></button> : <button className="split-tab-button" title="Close right editor group" aria-label="Close right editor group" onClick={() => { setOpenTabs((before) => [...before, ...rightTabs.filter((id) => !before.includes(id))]); setPageId(splitPageId ?? pageId); setRightTabs([]); setSplitPageId(null); setActivePane(0); }}><X size={15} /></button>}
     </div>;
   };
@@ -442,7 +504,7 @@ export default function App() {
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && sectionId) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length && sectionId) { event.preventDefault(); void importFilesToSection(Array.from(event.dataTransfer.files), sectionId); } }}>
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} documentIds={new Set(snapshot.documentPages.map((item) => item.page_id))} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} onSelect={(selected) => { if (selected.kind === 'section') { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') openPage(selected.id, selected.parent_id); }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} />)}
+          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} documentIds={new Set(snapshot.documentPages.map((item) => item.page_id))} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'section') { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') openPage(selected.id, selected.parent_id); }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -453,15 +515,17 @@ export default function App() {
       <main className="editor-area">
         <div className={`editor-tabs-row ${rightTabs.length ? 'split' : ''}`}>{renderTabStrip(0)}{rightTabs.length > 0 && renderTabStrip(1)}</div>
         <div className="workspace-toolbar" ref={setToolbarHost} />
-        <div className={`editor-panes ${rightTabs.length ? 'split' : ''} ${tabDropPane === 1 && !rightTabs.length ? 'drag-split-preview' : ''}`}>{renderPane(pageId, 0)}{rightTabs.length > 0 && renderPane(splitPageId, 1)}</div>
+        <div className={`editor-panes ${rightTabs.length ? 'split' : ''} ${tabDrop?.split && tabGhost ? 'drag-split-preview' : ''}`}>{renderPane(pageId, 0)}{rightTabs.length > 0 && renderPane(splitPageId, 1)}</div>
       </main>
     </div>
+
+    {tabGhost && <div className="drag-ghost tab-ghost" style={{ left: tabGhost.x + 12, top: tabGhost.y + 12 }} aria-hidden="true"><FileText size={14} />{nodes.find((item) => item.id === tabGhost.id)?.title}</div>}
+    {treeDrag && <div className="drag-ghost tree-ghost" style={{ left: treeDrag.x + 12, top: treeDrag.y + 12 }} aria-hidden="true"><FileText size={14} />{nodes.find((item) => item.id === treeDrag.id)?.title}</div>}
 
     {dialogRequest && <div className="modal-backdrop" onClick={() => finishDialog(null)}><form className="modal input-dialog" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); finishDialog(dialogRequest.mode === 'confirm' ? 'yes' : dialogValue.trim()); }} onKeyDown={(event) => { if (event.key === 'Escape') finishDialog(null); }}><div className="modal-head"><h2>{dialogRequest.title}</h2><button className="icon-button" type="button" onClick={() => finishDialog(null)}><X size={18} /></button></div>{dialogRequest.message && <p>{dialogRequest.message}</p>}{dialogRequest.mode === 'text' && <input autoFocus aria-label={dialogRequest.title} value={dialogValue} onChange={(event) => setDialogValue(event.target.value)} maxLength={200} required />}<div className="dialog-actions"><button type="button" onClick={() => finishDialog(null)}>Cancel</button><button type="submit" className={dialogRequest.action === 'Delete' ? 'danger' : 'primary'}>{dialogRequest.action}</button></div></form></div>}
     {toast && <div className="toast" role="status">{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}
   </div>;
 }
-
 function ExtensionsPanel({ directory, extensions, onToggle, onSetting, onSearch, onInstall }: { directory: string; extensions: ExtensionInfo[]; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void; onSearch(query: string): Promise<MarketplaceSearch>; onInstall(entry: MarketplaceEntry): Promise<void> }) {
   const [query, setQuery] = useState('');
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -511,13 +575,13 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates }: {
   </div>;
 }
 
-interface TreeProps { node: TreeNode; nodes: TreeNode[]; documentIds: Set<string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void }
+interface TreeProps { node: TreeNode; nodes: TreeNode[]; documentIds: Set<string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; treeDrop: TreeDrop | null; dragSourceId: string | null; suppressTreeClick: { current: boolean }; onTreePointerDown(id: string, event: React.PointerEvent<HTMLDivElement>): void; onTreePointerCancel(): void; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void }
 function TreeItem(props: TreeProps) {
-  const { node, nodes, documentIds, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove, onImportFiles, onPickDocuments } = props;
+  const { node, nodes, documentIds, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, treeDrop, dragSourceId, suppressTreeClick, onTreePointerDown, onTreePointerCancel, onToggle, onSelect, onCreate, onRename, onDelete, onImportFiles, onPickDocuments } = props;
   const children = childrenOf(nodes, node.id);
   const expandable = node.kind !== 'page';
   const menu = openMenuId === node.id;
-  const [drop, setDrop] = useState(false);
+  const [fileDrop, setFileDrop] = useState(false);
   const dropSection = node.kind === 'section' ? node.id : node.kind === 'page' ? node.parent_id : nodes.find((candidate) => {
     if (candidate.kind !== 'section') return false;
     let parentId = candidate.parent_id;
@@ -526,16 +590,12 @@ function TreeItem(props: TreeProps) {
   })?.id;
   const activate = () => node.kind === 'notebook' || node.kind === 'folder' ? onToggle(node.id) : onSelect(node);
   const onDrop = (event: React.DragEvent) => {
-    event.preventDefault(); event.stopPropagation(); setDrop(false);
-    if (event.dataTransfer.files.length) { if (dropSection) onImportFiles(Array.from(event.dataTransfer.files), dropSection); return; }
-    const movingId = event.dataTransfer.getData('text/plain');
-    const moving = nodes.find((item) => item.id === movingId);
-    if (!moving || movingId === node.id) return;
-    if ((node.kind === 'section' && moving.kind !== 'page') || (node.kind === 'notebook' && moving.kind === 'notebook')) onMove(movingId, node.parent_id, node.id);
-    else onMove(movingId, expandable ? node.id : node.parent_id, expandable ? null : node.id);
+    if (!event.dataTransfer.files.length || !dropSection) return;
+    event.preventDefault(); event.stopPropagation(); setFileDrop(false);
+    onImportFiles(Array.from(event.dataTransfer.files), dropSection);
   };
   return <>
-    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && !dropSection) return; event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
+    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${treeDrop?.id === node.id ? `drop-${treeDrop.placement}` : fileDrop ? 'drop-inside' : ''} ${dragSourceId === node.id ? 'drag-source' : ''}`} data-node-id={node.id} style={{ paddingLeft: 8 + depth * 17, '--drop-indent': `${8 + depth * 17}px` } as React.CSSProperties} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button,.tree-menu')) onTreePointerDown(node.id, event); }} onPointerCancel={onTreePointerCancel} onDragOver={(event) => { if (!event.dataTransfer.types.includes('Files') || !dropSection) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setFileDrop(true); }} onDragLeave={() => setFileDrop(false)} onDrop={onDrop} onClick={() => { if (!suppressTreeClick.current) activate(); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
       {expandable ? <button className="tree-chevron" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.title}`} onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}>{expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-chevron" />}
       <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : node.kind === 'section' ? <Layers3 size={15} /> : documentIds.has(node.id) ? <FileIcon size={15} /> : <FileText size={15} />}</span>
       <span className="tree-name" title={node.title}>{node.title}</span>
