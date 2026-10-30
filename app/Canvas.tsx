@@ -14,7 +14,7 @@ import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; toolbarActions?: React.ReactNode; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -69,7 +69,7 @@ async function pdfPrintoutHeight(assetId: string, width: number) {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, toolbarActions, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<CanvasTool>('text');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
@@ -550,7 +550,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       <div className="tool-group"><ToolButton icon={<PenLine size={16} />} name="Pen" tool="pen" active={tool} onClick={updateTool} /><ToolButton icon={<Highlighter size={16} />} name="Highlight" tool="highlighter" active={tool} onClick={updateTool} /><ToolButton icon={<Eraser size={16} />} name="Erase" tool="eraser" active={tool} onClick={updateTool} /><ToolButton icon={<Scan size={16} />} name="Lasso" tool="lasso" active={tool} onClick={updateTool} /><ToolButton icon={<Hand size={16} />} name="Pan" tool="hand" active={tool} onClick={updateTool} /></div>
       <div className="toolbar-divider" />
       <div className="tool-group"><label className="color-control" title="Ink color"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label><input className="width-slider" aria-label="Pen width" type="range" min="1" max="24" value={width} onChange={(event) => setWidth(Number(event.target.value))} /><span className="width-value">{width}px</span>{tool === 'eraser' && <label className="partial-toggle"><input type="checkbox" checked={partialEraser} onChange={(event) => setPartialEraser(event.target.checked)} /> Partial</label>}</div>
-      <div className="toolbar-spacer" />
+        <div className="toolbar-spacer" />
+        {toolbarActions && <div className="canvas-toolbar-actions">{toolbarActions}</div>}
       <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<button title="Canvas full screen" onClick={onToggleFocus}><Maximize2 size={16} /></button></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>}

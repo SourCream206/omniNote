@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2 } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Copy, PanelRight } from 'lucide-react';
 import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 import MarketplacePanel from './MarketplacePanel';
@@ -15,6 +15,10 @@ export default function App() {
   const dialogResolver = useRef<((value: string | null) => void) | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [splitPageId, setSplitPageId] = useState<string | null>(null);
+  const [activePane, setActivePane] = useState<0 | 1>(0);
+  const [maximized, setMaximized] = useState(true);
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openTreeMenuId, setOpenTreeMenuId] = useState<string | null>(null);
@@ -29,9 +33,12 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({ state: 'unavailable', message: 'Updates are available in installed releases.' });
   const canvasRef = useRef<CanvasHandle>(null);
+  const splitCanvasRef = useRef<CanvasHandle>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const insertRef = useRef<HTMLDivElement>(null);
+  const tabPointer = useRef<{ id: string; x: number; y: number } | null>(null);
+  const suppressTabClick = useRef(false);
 
   const refresh = useCallback(async () => {
     const data = await window.whiteboard.load();
@@ -48,7 +55,7 @@ export default function App() {
   useEffect(() => {
     Promise.all([refresh(), refreshExtensions()]).then(([data]) => {
       const first = data.nodes.find((node) => node.kind === 'page');
-      if (first) { setPageId(first.id); setSectionId(first.parent_id); }
+      if (first) { setPageId(first.id); setOpenTabs([first.id]); setSectionId(first.parent_id); }
       setExpanded(new Set(data.nodes.filter((node) => node.kind !== 'page').map((node) => node.id)));
     }).catch((error) => setToast(String(error)));
   }, [refresh, refreshExtensions]);
@@ -58,6 +65,7 @@ export default function App() {
     window.whiteboard.getUpdateStatus().then(setUpdateStatus).catch(notifyError);
     return unsubscribe;
   }, []);
+  useEffect(() => window.whiteboard.onWindowMaximized(setMaximized), []);
 
   useEffect(() => {
     if (!toast) return;
@@ -94,6 +102,28 @@ export default function App() {
 
   useEffect(() => { if (activePanel !== 'explorer') setOpenTreeMenuId(null); }, [activePanel]);
 
+  useEffect(() => {
+    const finishTabMove = (event: PointerEvent) => {
+      const source = tabPointer.current;
+      tabPointer.current = null;
+      if (!source || Math.hypot(event.clientX - source.x, event.clientY - source.y) < 10) return;
+      suppressTabClick.current = true;
+      window.setTimeout(() => { suppressTabClick.current = false; }, 0);
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const targetTab = target?.closest<HTMLElement>('.page-tab')?.dataset.pageId;
+      if (targetTab && targetTab !== source.id) setOpenTabs((before) => {
+        const next = before.filter((id) => id !== source.id);
+        next.splice(next.indexOf(targetTab), 0, source.id);
+        return next;
+      });
+      const targetPane = target?.closest<HTMLElement>('.editor-pane')?.dataset.pane;
+      if (targetPane === '0') { setPageId(source.id); setSplitPageId((before) => before === source.id ? null : before); setActivePane(0); }
+      if (targetPane === '1') { setSplitPageId(source.id); setPageId((before) => before === source.id ? openTabs.find((id) => id !== source.id) ?? null : before); setActivePane(1); }
+    };
+    document.addEventListener('pointerup', finishTabMove);
+    return () => document.removeEventListener('pointerup', finishTabMove);
+  }, [openTabs]);
+
   async function toggleFocus() {
     try {
       const next = !focusMode;
@@ -127,13 +157,9 @@ export default function App() {
 
 
   const nodes = snapshot?.nodes ?? [];
-  const page = nodes.find((node) => node.id === pageId && node.kind === 'page') ?? null;
+  const activePageId = activePane === 1 && splitPageId ? splitPageId : pageId;
+  const page = nodes.find((node) => node.id === activePageId && node.kind === 'page') ?? null;
   const section = nodes.find((node) => node.id === sectionId && node.kind === 'section') ?? null;
-  const notebook = useMemo(() => {
-    let current = section;
-    while (current?.parent_id) current = nodes.find((node) => node.id === current?.parent_id) ?? null;
-    return current?.kind === 'notebook' ? current : nodes.find((node) => node.kind === 'notebook');
-  }, [nodes, section]);
 
   const notifyError = (error: unknown) => setToast(error instanceof Error ? error.message : String(error));
 
@@ -157,11 +183,11 @@ export default function App() {
     try {
       const nodeId = await window.whiteboard.createNode(parentId, kind, title);
       const data = await refresh();
-      if (kind === 'page') { setPageId(nodeId); setSectionId(parentId); }
-      if (kind === 'section') { setSectionId(nodeId); setPageId(null); }
+      if (kind === 'page') { openPage(nodeId, parentId); }
+      if (kind === 'section') { setSectionId(nodeId); openPage(firstPageIn(data.nodes, nodeId), nodeId); }
       if (parentId) setExpanded((before) => new Set([...before, parentId]));
       if (kind === 'notebook') setExpanded((before) => new Set([...before, nodeId]));
-      if (!data.nodes.length) setPageId(null);
+      if (!data.nodes.length) { setPageId(null); setOpenTabs([]); setSplitPageId(null); }
     } catch (error) { notifyError(error); }
   }
 
@@ -177,9 +203,12 @@ export default function App() {
     try {
       await window.whiteboard.deleteNode(node.id);
       const data = await refresh();
+      setOpenTabs((before) => before.filter((id) => data.nodes.some((item) => item.id === id)));
+      if (splitPageId && !data.nodes.some((item) => item.id === splitPageId)) { setSplitPageId(null); setActivePane(0); }
       if (!data.nodes.some((item) => item.id === pageId)) {
         const first = data.nodes.find((item) => item.kind === 'page');
         setPageId(first?.id ?? null);
+        if (first) setOpenTabs((before) => before.includes(first.id) ? before : [...before, first.id]);
         setSectionId(first?.parent_id ?? null);
       }
     } catch (error) { notifyError(error); }
@@ -190,11 +219,34 @@ export default function App() {
     catch (error) { notifyError(error); }
   }
 
+  function openPage(targetId: string | null, parentId: string | null) {
+    if (targetId) setOpenTabs((before) => before.includes(targetId) ? before : [...before, targetId]);
+    if (targetId && targetId === pageId) setActivePane(0);
+    else if (targetId && targetId === splitPageId) setActivePane(1);
+    else if (activePane === 1 && splitPageId && targetId) setSplitPageId(targetId);
+    else setPageId(targetId);
+    setSectionId(parentId);
+  }
+
+  function closeTab(targetId: string) {
+    const remaining = openTabs.filter((id) => id !== targetId);
+    setOpenTabs(remaining);
+    if (splitPageId === targetId) { setSplitPageId(null); setActivePane(0); }
+    if (pageId === targetId) setPageId(remaining.find((id) => id !== splitPageId) ?? null);
+  }
+
+  function splitTab(targetId: string) {
+    if (splitPageId === targetId) { setPageId(targetId); setSplitPageId(null); setActivePane(0); return; }
+    setSplitPageId(targetId);
+    if (pageId === targetId) setPageId(openTabs.find((id) => id !== targetId) ?? null);
+    setActivePane(1);
+  }
+
   function navigatePage(targetId: string) {
     const target = nodes.find((node) => node.id === targetId && node.kind === 'page');
-    if (target) { setPageId(target.id); setSectionId(target.parent_id); }
+    if (target) openPage(target.id, target.parent_id);
     const targetSection = nodes.find((node) => node.id === targetId && node.kind === 'section');
-    if (targetSection) { setSectionId(targetSection.id); setPageId(firstPageIn(nodes, targetSection.id)); }
+    if (targetSection) openPage(firstPageIn(nodes, targetSection.id), targetSection.id);
   }
 
   function updatePage(pageIdValue: string, objects: CanvasObject[], camera: Camera) {
@@ -206,11 +258,11 @@ export default function App() {
   }
 
   async function changePaper(style: PaperStyle) {
-    if (!pageId) return;
+    if (!activePageId) return;
     setPaperOpen(false);
     try {
-      await window.whiteboard.setPageStyle(pageId, style);
-      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === pageId ? { ...row, paper_style: style } : row) } : previous);
+      await window.whiteboard.setPageStyle(activePageId, style);
+      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === activePageId ? { ...row, paper_style: style } : row) } : previous);
     } catch (error) { notifyError(error); }
   }
 
@@ -218,7 +270,7 @@ export default function App() {
     setInsertOpen(false);
     try {
       const assets = await window.whiteboard.pickAssets();
-      for (const asset of assets) { await canvasRef.current?.insertAsset(asset, presentation); await importedAsset(asset); }
+      for (const asset of assets) { await (activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.insertAsset(asset, presentation); await importedAsset(asset); }
     } catch (error) { notifyError(error); }
   }
 
@@ -247,8 +299,8 @@ export default function App() {
           const message = event.data;
           if (message?.requestId !== requestId) return;
           try {
-            if (message.type === 'canvas.insertText' && extension.grantedPermissions.includes('canvas.write') && typeof message.text === 'string') canvasRef.current?.insertText(message.text.slice(0, 10000));
-            else if (message.type === 'canvas.insertObject' && extension.grantedPermissions.includes('canvas.write') && extension.manifest.contributes.canvasObjectTypes?.some((entry) => entry.type === message.objectType)) canvasRef.current?.insertExtensionObject(extension.manifest.id, message.objectType, message.data);
+            if (message.type === 'canvas.insertText' && extension.grantedPermissions.includes('canvas.write') && typeof message.text === 'string') (activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.insertText(message.text.slice(0, 10000));
+            else if (message.type === 'canvas.insertObject' && extension.grantedPermissions.includes('canvas.write') && extension.manifest.contributes.canvasObjectTypes?.some((entry) => entry.type === message.objectType)) (activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.insertExtensionObject(extension.manifest.id, message.objectType, message.data);
             else if (message.type === 'export.writeFile' && extension.grantedPermissions.includes('export.write') && typeof message.name === 'string') await window.whiteboard.saveExtensionExport(message.name, new Uint8Array(message.bytes));
             else throw new Error('Extension requested an undeclared capability');
             setToast(`${extension.manifest.name} ran`);
@@ -283,15 +335,23 @@ export default function App() {
   }
 
   if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
-  const paperStyle = snapshot.pages.find((row) => row.id === pageId)?.paper_style ?? 'blank';
+  const paperStyle = snapshot.pages.find((row) => row.id === activePageId)?.paper_style ?? 'blank';
+  const tabs = openTabs.map((id) => nodes.find((node) => node.id === id && node.kind === 'page')).filter((node): node is TreeNode => Boolean(node));
+  const toolbarActions = <>
+    <div className="export-control" ref={exportRef}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Page as PDF</button><button onClick={() => { setExportOpen(false); Promise.resolve((activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.flushPendingSave()).then(() => window.whiteboard.exportWorkspace()).catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div>}</div>
+    <div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div>
+    <div className="insert-control" ref={insertRef}><button className="header-button" aria-expanded={insertOpen} onClick={() => setInsertOpen((open) => !open)}><Upload size={15} /> Insert file <ChevronDown size={12} /></button>{insertOpen && <div className="insert-menu"><button onClick={() => insertFiles('block')}>As embedded block</button><button onClick={() => insertFiles('printout')}>As page printout <small>PDF or DOCX</small></button></div>}</div>
+  </>;
+  const renderPane = (id: string | null, pane: 0 | 1) => {
+    const panePage = nodes.find((node) => node.id === id && node.kind === 'page');
+    return <div className={`editor-pane ${activePane === pane ? 'active' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
+      {splitPageId && <div className="pane-caption"><FileText size={13} /><span>{panePage?.title ?? 'Open a page from Explorer'}</span>{pane === 1 && <button title="Close split" aria-label="Close split" onClick={() => { setSplitPageId(null); setActivePane(0); }}><X size={14} /></button>}</div>}
+      {panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} toolbarActions={activePane === pane ? toolbarActions : undefined} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+    </div>;
+  };
 
   return <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
-    <header className="app-header">
-      <div className="brand"><strong>omniNote</strong></div>
-      <div className="header-divider" />
-      <div className="breadcrumbs"><span>{notebook?.title ?? 'Workspace'}</span><ChevronRight size={13} /><span>{section?.title ?? 'Select a section'}</span></div>
-      <div className="header-actions"><div className="export-control" ref={exportRef}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Page as PDF</button><button onClick={() => { setExportOpen(false); Promise.resolve(canvasRef.current?.flushPendingSave()).then(() => window.whiteboard.exportWorkspace()).catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div>}</div></div>
-    </header>
+    <header className="window-titlebar"><div className="window-logo" title="omniNote"><FileText size={17} /></div><div className="window-drag-region" /><div className="window-controls"><button title="Minimize" aria-label="Minimize window" onClick={() => window.whiteboard.windowAction('minimize')}><Minus size={15} /></button><button title={maximized ? 'Restore' : 'Maximize'} aria-label={maximized ? 'Restore window' : 'Maximize window'} onClick={() => window.whiteboard.windowAction('maximize').then(setMaximized)}>{maximized ? <Copy size={13} /> : <Maximize2 size={13} />}</button><button className="window-close" title="Close" aria-label="Close window" onClick={() => window.whiteboard.windowAction('close')}><X size={17} /></button></div></header>
 
     <div className="app-body">
       <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button>{['available', 'downloaded'].includes(updateStatus.state) && <button className="update-trigger" title={`Install omniNote ${updateStatus.version ?? 'update'}`} aria-label={`Install update ${updateStatus.version ?? ''}`} onClick={promptUpdate}><Download size={19} /><span className="update-dot" /></button>}<button className={`settings-trigger ${activePanel === 'settings' ? 'active' : ''}`} title="Settings" aria-label="Settings" aria-expanded={activePanel === 'settings'} onClick={() => setActivePanel((panel) => panel === 'settings' ? null : 'settings')}><Settings2 size={20} /></button></nav>
@@ -299,7 +359,7 @@ export default function App() {
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks">
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={pageId} onSelect={(selected) => { if (selected.kind === 'section') { setSectionId(selected.id); setPageId(firstPageIn(nodes, selected.id)); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') { setPageId(selected.id); setSectionId(selected.parent_id); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
+          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} onSelect={(selected) => { if (selected.kind === 'section') { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') openPage(selected.id, selected.parent_id); }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -308,7 +368,16 @@ export default function App() {
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
-        {page ? <><div className="page-topline"><div><h1 onDoubleClick={() => renameNode(page)} title="Double click to rename">{page.title}</h1><p>{new Date(page.updated_at).toLocaleDateString()}</p></div><div className="page-actions"><div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div><div className="insert-control" ref={insertRef}><button aria-expanded={insertOpen} onClick={() => setInsertOpen((open) => !open)}><Upload size={15} /> Insert file <ChevronDown size={12} /></button>{insertOpen && <div className="insert-menu"><button onClick={() => insertFiles('block')}>As embedded block</button><button onClick={() => insertFiles('printout')}>As page printout <small>PDF or DOCX</small></button></div>}</div></div></div><Canvas key={page.id} ref={canvasRef} page={page} row={snapshot.pages.find((row) => row.id === page.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === page.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /></> : <div className="no-page"><Layers3 size={42} /><h2>Choose a page to begin</h2><p>Your canvas will appear here.</p></div>}
+        <div className="page-tabs" role="tablist" aria-label="Open pages">
+          {tabs.map((tab) => <div key={tab.id} data-page-id={tab.id} className={`page-tab ${activePageId === tab.id ? 'active' : ''}`} role="tab" aria-selected={activePageId === tab.id} tabIndex={0}
+            onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button')) tabPointer.current = { id: tab.id, x: event.clientX, y: event.clientY }; }}
+            onClick={() => { if (suppressTabClick.current) return; if (splitPageId === tab.id) setActivePane(1); else { setPageId(tab.id); setActivePane(0); } setSectionId(tab.parent_id); }}
+            onDoubleClick={() => renameNode(tab)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>
+            <FileText size={14} /><span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}><X size={13} /></button>
+          </div>)}
+          <button className="split-tab-button" title={splitPageId ? 'Close split view' : 'Split active page right'} aria-label={splitPageId ? 'Close split view' : 'Split active page right'} disabled={!activePageId} onClick={() => activePageId && splitTab(activePageId)}><PanelRight size={16} /></button>
+        </div>
+        <div className={`editor-panes ${splitPageId ? 'split' : ''}`}>{renderPane(pageId, 0)}{splitPageId && renderPane(splitPageId, 1)}</div>
       </main>
     </div>
 

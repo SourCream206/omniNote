@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, net, protocol, session, shell } = require('electron');
+const { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, net, protocol, screen, session, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -90,6 +90,13 @@ function registerIpc() {
   handle('window:full-screen', (enabled) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid fullscreen state');
     window.setFullScreen(enabled);
+  });
+  handle('window:action', (action) => {
+    if (action === 'minimize') window.minimize();
+    else if (action === 'maximize') window.isMaximized() ? window.unmaximize() : window.maximize();
+    else if (action === 'close') { window.close(); return false; }
+    else throw new Error('Invalid window action');
+    return window.isMaximized();
   });
   handle('updates:status', () => updateStatus);
   handle('updates:check', async () => {
@@ -210,14 +217,17 @@ app.whenReady().then(() => {
   registerIpc();
   configureUpdates();
 
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
   window = new BrowserWindow({
-    width: 1500, height: 930, minWidth: 1000, minHeight: 680, show: false,
-    backgroundColor: '#f7f7f8', title: 'omniNote', autoHideMenuBar: true,
+    width: Math.min(1500, workArea.width), height: Math.min(930, workArea.height), minWidth: 1000, minHeight: 680, show: false,
+    backgroundColor: '#f7f7f8', title: 'omniNote', autoHideMenuBar: true, frame: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,
     },
   });
+  window.on('maximize', () => window.webContents.send('window:maximized', true));
+  window.on('unmaximize', () => window.webContents.send('window:maximized', false));
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.once('ready-to-show', () => { window.maximize(); window.show(); });

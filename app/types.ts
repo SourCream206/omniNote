@@ -60,6 +60,8 @@ export interface WhiteboardBridge {
   exportWorkspace(): Promise<boolean>;
   exportPagePdf(): Promise<boolean>;
   setFullScreen(enabled: boolean): Promise<void>;
+  windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<boolean>;
+  onWindowMaximized(callback: (maximized: boolean) => void): () => void;
   getUpdateStatus(): Promise<UpdateStatus>;
   checkForUpdates(): Promise<UpdateStatus>;
   promptToInstallUpdate(): Promise<UpdateStatus>;

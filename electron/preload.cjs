@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   exportWorkspace: () => invoke('workspace:export'),
   exportPagePdf: () => invoke('page:export-pdf'),
   setFullScreen: (enabled) => invoke('window:full-screen', enabled),
+  windowAction: (action) => invoke('window:action', action),
+  onWindowMaximized: (callback) => {
+    const listener = (_event, maximized) => callback(maximized);
+    ipcRenderer.on('window:maximized', listener);
+    return () => ipcRenderer.removeListener('window:maximized', listener);
+  },
   getUpdateStatus: () => invoke('updates:status'),
   checkForUpdates: () => invoke('updates:check'),
   promptToInstallUpdate: () => invoke('updates:prompt'),
