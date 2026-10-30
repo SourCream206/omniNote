@@ -15,7 +15,7 @@ import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -70,9 +70,8 @@ async function pdfPrintoutHeight(assetId: string, width: number) {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
-  const [tool, setTool] = useState<CanvasTool>('text');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
   const [selected, setSelected] = useState<string[]>([]);
@@ -114,6 +113,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const cameraRef = useRef(camera);
   const selectedRef = useRef(selected);
   const toolRef = useRef(tool);
+  toolRef.current = tool;
   const penLastSeen = useRef(-Infinity);
   const spaceHeld = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,7 +123,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const updateObjects = (next: CanvasObject[]) => { objectsRef.current = next; setObjects(next); scheduleSave(next, cameraRef.current); };
   const updateCamera = (next: Camera) => { cameraRef.current = next; setCamera(next); scheduleSave(objectsRef.current, next); };
   const updateSelected = (next: string[]) => { selectedRef.current = next; setSelected(next); setAttachmentMenuId((current) => current && next.includes(current) ? current : null); };
-  const updateTool = (next: CanvasTool) => { toolRef.current = next; setTool(next); setActiveDoc(null); if (next !== 'select') updateSelected([]); };
+  const updateTool = (next: CanvasTool) => { toolRef.current = next; onToolChange(next); setActiveDoc(null); if (next !== 'select') updateSelected([]); };
 
   function scheduleSave(nextObjects: CanvasObject[], nextCamera: Camera) {
     const revision = ++editRevision.current;
@@ -606,13 +606,16 @@ function RichToolbar({ selectedObject, fontSize, onAction, onRequestLink, nodes,
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    setAppearanceOpen(false);
+  }, [selectedObject?.id]);
+  useEffect(() => {
     if (!appearanceOpen) return;
     const close = (event: PointerEvent) => { if (!appearanceRef.current?.contains(event.target as Node)) setAppearanceOpen(false); };
     document.addEventListener('pointerdown', close, true);
     return () => document.removeEventListener('pointerdown', close, true);
   }, [appearanceOpen]);
   const link = async () => { const url = await onRequestLink(); if (url) onAction(`link:${url}`); };
-  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><select className="font-size-select" aria-label="Text size" title="Text size" disabled={!active} value={fontSize} onChange={(event) => onAction(`size:${event.target.value || 'default'}`)}><option value="">Default · 14</option>{[12, 14, 16, 18, 20, 24, 28, 32, 40, 48].map((size) => <option key={size} value={`${size}px`}>{size}</option>)}</select><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} /><div className="note-appearance" ref={appearanceRef}><button title="Note appearance" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((open) => !open)}><StickyNote size={15} /> Appearance</button>{appearanceOpen && <div className="appearance-menu"><button onClick={() => onAppearance({ ...appearance, color: null })}>Plain text on paper</button><label>Sticky Note color <input aria-label="Sticky Note color" type="color" value={appearance.color ?? '#fff1b8'} onChange={(event) => onAppearance({ ...appearance, color: event.target.value })} /></label><label>Opacity <input aria-label="Sticky Note opacity" type="range" min="0" max="100" value={appearance.opacity} onChange={(event) => onAppearance({ ...appearance, color: appearance.color ?? '#fff1b8', opacity: Number(event.target.value) })} /><span>{appearance.opacity}%</span></label></div>}</div></div>;
+  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><select className="font-size-select" aria-label="Text size" title="Text size" disabled={!active} value={fontSize} onChange={(event) => onAction(`size:${event.target.value || 'default'}`)}><option value="">Default · 14</option>{[12, 14, 16, 18, 20, 24, 28, 32, 40, 48].map((size) => <option key={size} value={`${size}px`}>{size}</option>)}</select><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} />{appearance.color && <div className="note-appearance" ref={appearanceRef}><button title="Sticky Note appearance" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((open) => !open)}><StickyNote size={15} /> Appearance</button>{appearanceOpen && <div className="appearance-menu"><label>Color <input aria-label="Sticky Note color" type="color" value={appearance.color} onChange={(event) => onAppearance({ ...appearance, color: event.target.value })} /></label><label>Opacity <input aria-label="Sticky Note opacity" type="range" min="0" max="100" value={appearance.opacity} onChange={(event) => onAppearance({ ...appearance, opacity: Number(event.target.value) })} /><span>{appearance.opacity}%</span></label></div>}</div>}</div>;
 }
 
 function TextBlock({ object, autoFocus, onChange, onHeightChange, onFontSizeChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; autoFocus: boolean; onChange(doc: unknown): void; onHeightChange(height: number): void; onFontSizeChange(size: string): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {

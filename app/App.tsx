@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, File as FileIcon, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Copy, PanelRight } from 'lucide-react';
-import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
+import type { Asset, CanvasObject, CanvasTool, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 import MarketplacePanel from './MarketplacePanel';
 import DocumentPage from './DocumentPage';
@@ -38,6 +38,7 @@ export default function App() {
   const [rightTabs, setRightTabs] = useState<string[]>([]);
   const [splitPageId, setSplitPageId] = useState<string | null>(null);
   const [activePane, setActivePane] = useState<0 | 1>(0);
+  const [activeTool, setActiveTool] = useState<CanvasTool>('text');
   const [maximized, setMaximized] = useState(true);
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [tabDrop, setTabDrop] = useState<TabDrop | null>(null);
@@ -472,7 +473,7 @@ export default function App() {
     const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
     const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
     return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
-      {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+      {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
     </div>;
   };
   const renderTabStrip = (pane: 0 | 1) => {

@@ -435,3 +435,7 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .editor-panes.split .editor-pane.active { border-color:var(--ui-line); }
 .tree-menu { min-width:156px; }
 .tree-menu button { white-space:nowrap; }
+.sidebar-width-resizer { top:39px; background:transparent; }
+.sidebar-width-resizer:hover, .sidebar-width-resizer:focus { background:transparent; }
+.sidebar-width-resizer::after { content:""; position:absolute; top:50%; left:50%; width:2px; height:40px; transform:translate(-50%,-50%); border-radius:2px; background:var(--ui-line); pointer-events:none; }
+.sidebar-width-resizer:hover::after, .sidebar-width-resizer:focus::after, .sidebar-width-resizer:active::after { background:var(--ui-accent); }
