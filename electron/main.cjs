@@ -75,6 +75,7 @@ function registerIpc() {
 
   handle('workspace:load', () => store.load());
   handle('node:create', (parentId, kind, title) => store.createNode(parentId, kind, title));
+  handle('document-page:create', (sectionId, assetId) => store.createDocumentPage(sectionId, assetId));
   handle('node:rename', (nodeId, title) => store.renameNode(nodeId, title));
   handle('node:delete', (nodeId) => store.deleteNode(nodeId));
   handle('node:move', (nodeId, parentId, beforeId) => store.moveNode(nodeId, parentId, beforeId));

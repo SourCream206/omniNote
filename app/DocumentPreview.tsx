@@ -16,7 +16,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => (
 const frameCsp = "default-src 'none'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; script-src 'none'; connect-src 'none'; base-uri 'none'";
 const htmlDocument = (body: string, styles = '') => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${frameCsp}"><style>html,body{margin:0;padding:8px;font:13px/1.45 system-ui,sans-serif;color:#253454;background:white}a{color:#285fc0;text-decoration:underline}table{border-collapse:collapse}td,th{border:1px solid #dce3ee;padding:3px 6px}img{max-width:100%}</style>${styles}</head><body>${body}</body></html>`;
 
-export default function DocumentPreview({ object, asset, viewer, interactive, onContentSize, onPreviewFailure, onError }: { object: CanvasObject; asset?: Asset; viewer?: { extension: ExtensionInfo; entry: string }; interactive: boolean; onContentSize?(size: { width: number; height: number }): void; onPreviewFailure(): void; onError(error: unknown): void }) {
+export default function DocumentPreview({ object, asset, viewer, interactive, fullDocument = false, onContentSize, onPreviewFailure, onError }: { object: CanvasObject; asset?: Asset; viewer?: { extension: ExtensionInfo; entry: string }; interactive: boolean; fullDocument?: boolean; onContentSize?(size: { width: number; height: number }): void; onPreviewFailure(): void; onError(error: unknown): void }) {
   const format = (object.payload as { format: string }).format;
   const assetId = (object.payload as { assetId: string }).assetId;
   const printout = (object.payload as { presentation?: string }).presentation === 'printout';
@@ -39,7 +39,7 @@ export default function DocumentPreview({ object, asset, viewer, interactive, on
     const run = async () => {
       try {
         let content: string;
-        if (format === 'docx') content = await renderDocx(bytes, printout);
+        if (format === 'docx') content = await renderDocx(bytes, printout, fullDocument);
         else if (format === 'xlsx') content = await renderXlsx(bytes);
         else if (format === 'pptx') content = await renderPptx(bytes);
         else if (['txt','md','markdown','html','htm'].includes(format)) {
@@ -51,7 +51,7 @@ export default function DocumentPreview({ object, asset, viewer, interactive, on
     };
     run();
     return () => { live = false; };
-  }, [bytes, format, viewer, printout]);
+  }, [bytes, format, viewer, printout, fullDocument]);
 
   useEffect(() => {
     if (!interactive || !html || !iframe.current) return;
@@ -79,12 +79,12 @@ export default function DocumentPreview({ object, asset, viewer, interactive, on
   if (viewer) return <div className={`document-body ${printout ? 'document-printout' : ''}`} onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}><ExtensionFrame extension={viewer.extension} entry={viewer.entry} kind="document" data={{ name: asset?.original_name, format }} bytes={bytes} interactive={interactive} onError={onError} /></div>;
   return <div className={`document-body ${printout ? 'document-printout' : ''}`} onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}>
     <div className="document-content">
-      {format === 'pdf' && file ? <div className="pdf-content" onClickCapture={(event) => {
+      {format === 'pdf' && file ? <div className={`pdf-content ${fullDocument ? 'full-document' : ''}`} onClickCapture={(event) => {
         const anchor = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
         if (!anchor) return;
         const href = anchor.getAttribute('href') || '';
         if (/^https?:|^mailto:/i.test(href)) { event.preventDefault(); event.stopPropagation(); window.whiteboard.openExternal(href).catch(onError); }
-      }}><Document file={file} suspense={false} onLoadSuccess={(pdf) => setPdfPages(pdf.numPages)} onLoadError={(reason) => setError(reason.message)} loading={<Loading />}>{Array.from({ length: Math.min(pdfPages, 50) }, (_, index) => <Page key={index} pageNumber={index + 1} width={Math.max(200, object.width - (printout ? 24 : 32))} renderTextLayer={!printout || interactive} renderAnnotationLayer={!printout || interactive} suspense={false} />)}</Document>{pdfPages > 50 && <p>First 50 pages shown. Open original for the rest.</p>}</div> : format === 'pdf' ? <Loading /> : html ? <iframe ref={iframe} title={`${format} preview`} srcDoc={html} sandbox="allow-same-origin" onLoad={() => { if (printout && format === 'docx') requestAnimationFrame(() => { const frame = iframe.current?.contentDocument; const wrapper = frame?.querySelector('.docx-wrapper'); const sheet = wrapper?.querySelector('section'); if (frame) onContentSize?.({ width: Math.max(200, Math.ceil(sheet?.getBoundingClientRect().width || frame.body.scrollWidth) + 16), height: Math.max(150, (wrapper?.scrollHeight || frame.body.scrollHeight) + 16) }); }); }} /> : <Loading />}
+      }}><Document file={file} suspense={false} onLoadSuccess={(pdf) => setPdfPages(pdf.numPages)} onLoadError={(reason) => setError(reason.message)} loading={<Loading />}>{Array.from({ length: fullDocument ? pdfPages : Math.min(pdfPages, 50) }, (_, index) => fullDocument ? <LazyPdfPage key={index} pageNumber={index + 1} width={Math.max(200, object.width - 32)} /> : <Page key={index} pageNumber={index + 1} width={Math.max(200, object.width - (printout ? 24 : 32))} renderTextLayer={!printout || interactive} renderAnnotationLayer={!printout || interactive} suspense={false} />)}</Document>{!fullDocument && pdfPages > 50 && <p>First 50 pages shown. Open original for the rest.</p>}</div> : format === 'pdf' ? <Loading /> : html ? <iframe ref={iframe} title={`${format} preview`} srcDoc={html} sandbox="allow-same-origin" onLoad={() => { if (printout && format === 'docx') requestAnimationFrame(() => { const frame = iframe.current?.contentDocument; const wrapper = frame?.querySelector('.docx-wrapper'); const sheet = wrapper?.querySelector('section'); if (frame) onContentSize?.({ width: Math.max(200, Math.ceil(sheet?.getBoundingClientRect().width || frame.body.scrollWidth) + 16), height: Math.max(150, (wrapper?.scrollHeight || frame.body.scrollHeight) + 16) }); }); }} /> : <Loading />}
       {!interactive && <div className="document-shield" aria-hidden="true" />}
     </div>
   </div>;
@@ -92,15 +92,27 @@ export default function DocumentPreview({ object, asset, viewer, interactive, on
 
 function Loading() { return <div className="document-loading"><LoaderCircle size={19} className="spin" /> Loading preview…</div>; }
 
-async function renderDocx(bytes: Uint8Array, printout = false) {
+function LazyPdfPage({ pageNumber, width }: { pageNumber: number; width: number }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) { setVisible(true); observer.disconnect(); } }, { rootMargin: '900px' });
+    if (host.current) observer.observe(host.current);
+    return () => observer.disconnect();
+  }, []);
+  return <div ref={host} className="pdf-page-slot" style={{ minHeight: visible ? undefined : Math.round(width * 1.3) }}>{visible && <Page pageNumber={pageNumber} width={width} renderTextLayer renderAnnotationLayer suspense={false} />}</div>;
+}
+
+async function renderDocx(bytes: Uint8Array, printout = false, fullDocument = false) {
   const body = document.createElement('div');
   const styles = document.createElement('div');
   await renderAsync(new Blob([new Uint8Array(bytes)]), body, styles, { breakPages: true, useBase64URL: true });
   // The DOCX renderer owns preview markup only; no script is allowed in the iframe.
   const cleanBody = DOMPurify.sanitize(body.innerHTML, { ADD_ATTR: ['style'] });
   const cleanStyles = [...styles.querySelectorAll('style')].map((element) => `<style>${element.textContent?.replaceAll('</style', '') ?? ''}</style>`).join('');
-  const printoutStyle = printout ? '<style>.docx-wrapper{background:#fff!important;padding:0!important}.docx-wrapper>section{margin:0 auto 12px!important;box-shadow:0 2px 8px #2235501a!important}</style>' : '';
-  return htmlDocument(cleanBody, cleanStyles + printoutStyle);
+  const printoutStyle = printout ? '<style>.docx-wrapper{background:#fff!important;padding:0!important}.docx-wrapper>section{box-sizing:border-box;min-width:760px!important;min-height:900px!important;padding:48px!important;margin:0 auto 12px!important;box-shadow:0 2px 8px #2235501a!important}</style>' : '';
+  const fullStyle = fullDocument ? '<style>html,body{height:100%;padding:0}.docx-wrapper{min-height:100%;padding:18px!important}.docx-wrapper>section{box-sizing:border-box;width:min(760px,100%)!important;min-height:900px;margin:0 auto 16px!important;padding:48px!important;box-shadow:0 2px 10px #22355020!important}</style>' : '';
+  return htmlDocument(cleanBody, cleanStyles + printoutStyle + fullStyle);
 }
 
 async function renderXlsx(bytes: Uint8Array) {

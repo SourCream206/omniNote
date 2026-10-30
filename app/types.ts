@@ -12,7 +12,7 @@ export type ObjectPayload =
   | { extensionId: string; objectType: string; data: unknown };
 export interface CanvasObject { id: string; page_id: string; type: 'text' | 'ink' | 'image' | 'audio' | 'video' | 'document' | 'extension'; x: number; y: number; width: number; height: number; z_index: number; group_id: string | null; payload_version: number; payload: ObjectPayload }
 export interface Camera { x: number; y: number; zoom: number }
-export interface Snapshot { schemaVersion: number; directory: string; nodes: TreeNode[]; pages: PageRow[]; objects: CanvasObject[]; assets: Asset[] }
+export interface Snapshot { schemaVersion: number; directory: string; nodes: TreeNode[]; pages: PageRow[]; documentPages: { page_id: string; asset_id: string }[]; objects: CanvasObject[]; assets: Asset[] }
 export interface ExtensionManifest {
   id: string; name: string; version: string; apiVersion: string; main: string;
   activationEvents: string[]; permissions: string[];
@@ -35,6 +35,7 @@ export interface UpdateStatus { state: 'unavailable' | 'idle' | 'checking' | 'av
 export interface WhiteboardBridge {
   load(): Promise<Snapshot>;
   createNode(parentId: string | null, kind: NodeKind, title: string): Promise<string>;
+  createDocumentPage(sectionId: string, assetId: string): Promise<string>;
   renameNode(nodeId: string, title: string): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;
   moveNode(nodeId: string, parentId: string | null, beforeId?: string | null): Promise<void>;

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Copy, PanelRight } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, FolderPlus, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, File as FileIcon, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Copy, PanelRight } from 'lucide-react';
 import type { Asset, CanvasObject, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 import MarketplacePanel from './MarketplacePanel';
+import DocumentPage from './DocumentPage';
 import { readTheme, themes, type ThemeId } from './theme';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
@@ -16,9 +17,14 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [rightTabs, setRightTabs] = useState<string[]>([]);
   const [splitPageId, setSplitPageId] = useState<string | null>(null);
   const [activePane, setActivePane] = useState<0 | 1>(0);
   const [maximized, setMaximized] = useState(true);
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [tabDropPane, setTabDropPane] = useState<0 | 1 | null>(null);
+  const [annotationPages, setAnnotationPages] = useState<Set<string>>(new Set());
+  const [pendingAnnotation, setPendingAnnotation] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openTreeMenuId, setOpenTreeMenuId] = useState<string | null>(null);
@@ -37,8 +43,9 @@ export default function App() {
   const exportRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const insertRef = useRef<HTMLDivElement>(null);
-  const tabPointer = useRef<{ id: string; x: number; y: number } | null>(null);
+  const tabPointer = useRef<{ id: string; pane: 0 | 1; x: number; y: number } | null>(null);
   const suppressTabClick = useRef(false);
+  const annotationInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
     const data = await window.whiteboard.load();
@@ -103,26 +110,59 @@ export default function App() {
   useEffect(() => { if (activePanel !== 'explorer') setOpenTreeMenuId(null); }, [activePanel]);
 
   useEffect(() => {
+    if (!pendingAnnotation || !snapshot || annotationInFlight.current) return;
+    const assetId = snapshot.documentPages.find((item) => item.page_id === pendingAnnotation)?.asset_id;
+    const asset = snapshot.assets.find((item) => item.id === assetId);
+    const editor = pageId === pendingAnnotation ? canvasRef.current : splitPageId === pendingAnnotation ? splitCanvasRef.current : null;
+    if (!asset || !editor) return;
+    annotationInFlight.current = true;
+    editor.insertAsset(asset, 'printout', { x: 16, y: 16 }).then(() => setPendingAnnotation(null)).catch(notifyError).finally(() => { annotationInFlight.current = false; });
+  }, [pendingAnnotation, snapshot, pageId, splitPageId]);
+
+  useEffect(() => {
+    const destinationFor = (event: PointerEvent): 0 | 1 | null => {
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const editor = target?.closest<HTMLElement>('.editor-area');
+      if (!editor) return null;
+      const tabStrip = target?.closest<HTMLElement>('.page-tabs')?.dataset.pane;
+      if (tabStrip === '0' || tabStrip === '1') return Number(tabStrip) as 0 | 1;
+      if (!rightTabs.length && event.clientX > editor.getBoundingClientRect().left + editor.clientWidth * 0.55) return 1;
+      const pane = target?.closest<HTMLElement>('[data-pane]')?.dataset.pane;
+      return pane === '0' || pane === '1' ? Number(pane) as 0 | 1 : null;
+    };
+    const previewTabMove = (event: PointerEvent) => {
+      const source = tabPointer.current;
+      if (source && Math.hypot(event.clientX - source.x, event.clientY - source.y) >= 10) setTabDropPane(destinationFor(event));
+    };
     const finishTabMove = (event: PointerEvent) => {
       const source = tabPointer.current;
       tabPointer.current = null;
+      setTabDropPane(null);
       if (!source || Math.hypot(event.clientX - source.x, event.clientY - source.y) < 10) return;
       suppressTabClick.current = true;
       window.setTimeout(() => { suppressTabClick.current = false; }, 0);
       const target = document.elementFromPoint(event.clientX, event.clientY);
       const targetTab = target?.closest<HTMLElement>('.page-tab')?.dataset.pageId;
-      if (targetTab && targetTab !== source.id) setOpenTabs((before) => {
-        const next = before.filter((id) => id !== source.id);
-        next.splice(next.indexOf(targetTab), 0, source.id);
-        return next;
-      });
-      const targetPane = target?.closest<HTMLElement>('.editor-pane')?.dataset.pane;
-      if (targetPane === '0') { setPageId(source.id); setSplitPageId((before) => before === source.id ? null : before); setActivePane(0); }
-      if (targetPane === '1') { setSplitPageId(source.id); setPageId((before) => before === source.id ? openTabs.find((id) => id !== source.id) ?? null : before); setActivePane(1); }
+      const destination = destinationFor(event);
+      if (destination === null) return;
+      if (source.pane === destination && targetTab === source.id) return;
+      const sourceTabs = source.pane === 0 ? openTabs : rightTabs;
+      const destTabs = destination === 0 ? openTabs : rightTabs;
+      const nextSource = sourceTabs.filter((id) => id !== source.id);
+      const nextDest = destination === source.pane ? nextSource : [...destTabs];
+      const position = targetTab ? nextDest.indexOf(targetTab) : -1;
+      nextDest.splice(position < 0 ? nextDest.length : position, 0, source.id);
+      if (source.pane === destination) destination === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest);
+      else { source.pane === 0 ? setOpenTabs(nextSource) : setRightTabs(nextSource); destination === 0 ? setOpenTabs(nextDest) : setRightTabs(nextDest); }
+      if (source.pane === 0 && destination === 1) setPageId(nextSource.includes(pageId ?? '') ? pageId : nextSource[0] ?? null);
+      if (source.pane === 1 && destination === 0) setSplitPageId(nextSource.includes(splitPageId ?? '') ? splitPageId : nextSource[0] ?? null);
+      if (destination === 0) setPageId(source.id); else setSplitPageId(source.id);
+      setActivePane(destination);
     };
+    document.addEventListener('pointermove', previewTabMove);
     document.addEventListener('pointerup', finishTabMove);
-    return () => document.removeEventListener('pointerup', finishTabMove);
-  }, [openTabs]);
+    return () => { document.removeEventListener('pointermove', previewTabMove); document.removeEventListener('pointerup', finishTabMove); };
+  }, [openTabs, rightTabs, pageId, splitPageId]);
 
   async function toggleFocus() {
     try {
@@ -187,7 +227,7 @@ export default function App() {
       if (kind === 'section') { setSectionId(nodeId); openPage(firstPageIn(data.nodes, nodeId), nodeId); }
       if (parentId) setExpanded((before) => new Set([...before, parentId]));
       if (kind === 'notebook') setExpanded((before) => new Set([...before, nodeId]));
-      if (!data.nodes.length) { setPageId(null); setOpenTabs([]); setSplitPageId(null); }
+      if (!data.nodes.length) { setPageId(null); setOpenTabs([]); setRightTabs([]); setSplitPageId(null); }
     } catch (error) { notifyError(error); }
   }
 
@@ -204,7 +244,8 @@ export default function App() {
       await window.whiteboard.deleteNode(node.id);
       const data = await refresh();
       setOpenTabs((before) => before.filter((id) => data.nodes.some((item) => item.id === id)));
-      if (splitPageId && !data.nodes.some((item) => item.id === splitPageId)) { setSplitPageId(null); setActivePane(0); }
+      setRightTabs((before) => before.filter((id) => data.nodes.some((item) => item.id === id)));
+      if (splitPageId && !data.nodes.some((item) => item.id === splitPageId)) { setSplitPageId(rightTabs.find((id) => id !== splitPageId && data.nodes.some((item) => item.id === id)) ?? null); setActivePane(0); }
       if (!data.nodes.some((item) => item.id === pageId)) {
         const first = data.nodes.find((item) => item.kind === 'page');
         setPageId(first?.id ?? null);
@@ -219,26 +260,49 @@ export default function App() {
     catch (error) { notifyError(error); }
   }
 
+  async function importFilesToSection(files: File[], targetSectionId: string) {
+    try {
+      let lastId: string | null = null;
+      for (const file of files) {
+        const asset = await window.whiteboard.importAsset(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
+        lastId = await window.whiteboard.createDocumentPage(targetSectionId, asset.id);
+      }
+      await refresh();
+      setExpanded((before) => new Set([...before, targetSectionId]));
+      if (lastId) openPage(lastId, targetSectionId);
+    } catch (error) { notifyError(error); }
+  }
+
+  function pickDocumentsForSection(targetSectionId: string) {
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.multiple = true;
+    picker.onchange = () => { if (picker.files?.length) void importFilesToSection(Array.from(picker.files), targetSectionId); };
+    picker.click();
+  }
+
   function openPage(targetId: string | null, parentId: string | null) {
-    if (targetId) setOpenTabs((before) => before.includes(targetId) ? before : [...before, targetId]);
     if (targetId && targetId === pageId) setActivePane(0);
-    else if (targetId && targetId === splitPageId) setActivePane(1);
-    else if (activePane === 1 && splitPageId && targetId) setSplitPageId(targetId);
-    else setPageId(targetId);
+    else if (targetId && openTabs.includes(targetId)) { setPageId(targetId); setActivePane(0); }
+    else if (targetId && rightTabs.includes(targetId)) { setSplitPageId(targetId); setActivePane(1); }
+    else if (activePane === 1 && rightTabs.length && targetId) { setRightTabs((before) => [...before, targetId]); setSplitPageId(targetId); }
+    else { if (targetId) setOpenTabs((before) => [...before, targetId]); setPageId(targetId); }
     setSectionId(parentId);
   }
 
-  function closeTab(targetId: string) {
-    const remaining = openTabs.filter((id) => id !== targetId);
-    setOpenTabs(remaining);
-    if (splitPageId === targetId) { setSplitPageId(null); setActivePane(0); }
-    if (pageId === targetId) setPageId(remaining.find((id) => id !== splitPageId) ?? null);
+  function closeTab(targetId: string, pane: 0 | 1) {
+    const remaining = (pane === 0 ? openTabs : rightTabs).filter((id) => id !== targetId);
+    if (pane === 0) { setOpenTabs(remaining); if (pageId === targetId) setPageId(remaining.at(-1) ?? null); }
+    else { setRightTabs(remaining); if (splitPageId === targetId) setSplitPageId(remaining.at(-1) ?? null); if (!remaining.length) setActivePane(0); }
   }
 
   function splitTab(targetId: string) {
-    if (splitPageId === targetId) { setPageId(targetId); setSplitPageId(null); setActivePane(0); return; }
+    if (rightTabs.includes(targetId)) { setSplitPageId(targetId); setActivePane(1); return; }
+    const remaining = openTabs.filter((id) => id !== targetId);
+    setOpenTabs(remaining);
+    setRightTabs((before) => [...before, targetId]);
     setSplitPageId(targetId);
-    if (pageId === targetId) setPageId(openTabs.find((id) => id !== targetId) ?? null);
+    if (pageId === targetId) setPageId(remaining.at(-1) ?? null);
     setActivePane(1);
   }
 
@@ -336,17 +400,36 @@ export default function App() {
 
   if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
   const paperStyle = snapshot.pages.find((row) => row.id === activePageId)?.paper_style ?? 'blank';
-  const tabs = openTabs.map((id) => nodes.find((node) => node.id === id && node.kind === 'page')).filter((node): node is TreeNode => Boolean(node));
   const toolbarActions = <>
+    {activePageId && snapshot.documentPages.some((item) => item.page_id === activePageId) && annotationPages.has(activePageId) && <button className="header-button" onClick={() => setAnnotationPages((before) => { const next = new Set(before); next.delete(activePageId); return next; })}>View document</button>}
     <div className="export-control" ref={exportRef}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Page as PDF</button><button onClick={() => { setExportOpen(false); Promise.resolve((activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.flushPendingSave()).then(() => window.whiteboard.exportWorkspace()).catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div>}</div>
     <div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div>
     <div className="insert-control" ref={insertRef}><button className="header-button" aria-expanded={insertOpen} onClick={() => setInsertOpen((open) => !open)}><Upload size={15} /> Insert file <ChevronDown size={12} /></button>{insertOpen && <div className="insert-menu"><button onClick={() => insertFiles('block')}>As embedded block</button><button onClick={() => insertFiles('printout')}>As page printout <small>PDF or DOCX</small></button></div>}</div>
   </>;
   const renderPane = (id: string | null, pane: 0 | 1) => {
     const panePage = nodes.find((node) => node.id === id && node.kind === 'page');
+    const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
+    const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
     return <div className={`editor-pane ${activePane === pane ? 'active' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
-      {splitPageId && <div className="pane-caption"><FileText size={13} /><span>{panePage?.title ?? 'Open a page from Explorer'}</span>{pane === 1 && <button title="Close split" aria-label="Close split" onClick={() => { setSplitPageId(null); setActivePane(0); }}><X size={14} /></button>}</div>}
-      {panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} toolbarActions={activePane === pane ? toolbarActions : undefined} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+      {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+    </div>;
+  };
+  const renderTabStrip = (pane: 0 | 1) => {
+    const ids = pane === 0 ? openTabs : rightTabs;
+    const selectedId = pane === 0 ? pageId : splitPageId;
+    return <div className="page-tabs" data-pane={pane} role="tablist" aria-label={`${pane === 0 ? 'Left' : 'Right'} editor tabs`}>
+      {ids.map((id) => {
+        const tab = nodes.find((node) => node.id === id && node.kind === 'page');
+        if (!tab) return null;
+        return <div key={tab.id} data-page-id={tab.id} className={`page-tab ${selectedId === tab.id ? 'active' : ''}`} role="tab" aria-selected={selectedId === tab.id} tabIndex={0}
+          onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button')) { tabPointer.current = { id: tab.id, pane, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); } }}
+          onPointerCancel={() => { tabPointer.current = null; setTabDropPane(null); }}
+          onClick={() => { if (suppressTabClick.current) return; pane === 0 ? setPageId(tab.id) : setSplitPageId(tab.id); setActivePane(pane); setSectionId(tab.parent_id); }}
+          onDoubleClick={() => renameNode(tab)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>
+          {snapshot.documentPages.some((item) => item.page_id === tab.id) ? <FileIcon size={14} /> : <FileText size={14} />}<span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id, pane); }}><X size={13} /></button>
+        </div>;
+      })}
+      {pane === 0 ? <button className="split-tab-button" title="Move current page to the right" aria-label="Move current page to the right" disabled={!pageId} onClick={() => pageId && splitTab(pageId)}><PanelRight size={16} /></button> : <button className="split-tab-button" title="Close right editor group" aria-label="Close right editor group" onClick={() => { setOpenTabs((before) => [...before, ...rightTabs.filter((id) => !before.includes(id))]); setPageId(splitPageId ?? pageId); setRightTabs([]); setSplitPageId(null); setActivePane(0); }}><X size={15} /></button>}
     </div>;
   };
 
@@ -358,8 +441,8 @@ export default function App() {
       {activePanel && <aside className="notebook-sidebar" aria-label={activePanel === 'explorer' ? 'Explorer' : activePanel === 'extensions' ? 'Extensions' : 'Settings'} style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
-        <div className="tree-scroll" role="tree" aria-label="Notebooks">
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} onSelect={(selected) => { if (selected.kind === 'section') { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') openPage(selected.id, selected.parent_id); }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
+        <div className="tree-scroll" role="tree" aria-label="Notebooks" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && sectionId) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length && sectionId) { event.preventDefault(); void importFilesToSection(Array.from(event.dataTransfer.files), sectionId); } }}>
+          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} documentIds={new Set(snapshot.documentPages.map((item) => item.page_id))} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} onSelect={(selected) => { if (selected.kind === 'section') { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') openPage(selected.id, selected.parent_id); }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -368,16 +451,9 @@ export default function App() {
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area">
-        <div className="page-tabs" role="tablist" aria-label="Open pages">
-          {tabs.map((tab) => <div key={tab.id} data-page-id={tab.id} className={`page-tab ${activePageId === tab.id ? 'active' : ''}`} role="tab" aria-selected={activePageId === tab.id} tabIndex={0}
-            onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button')) tabPointer.current = { id: tab.id, x: event.clientX, y: event.clientY }; }}
-            onClick={() => { if (suppressTabClick.current) return; if (splitPageId === tab.id) setActivePane(1); else { setPageId(tab.id); setActivePane(0); } setSectionId(tab.parent_id); }}
-            onDoubleClick={() => renameNode(tab)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>
-            <FileText size={14} /><span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}><X size={13} /></button>
-          </div>)}
-          <button className="split-tab-button" title={splitPageId ? 'Close split view' : 'Split active page right'} aria-label={splitPageId ? 'Close split view' : 'Split active page right'} disabled={!activePageId} onClick={() => activePageId && splitTab(activePageId)}><PanelRight size={16} /></button>
-        </div>
-        <div className={`editor-panes ${splitPageId ? 'split' : ''}`}>{renderPane(pageId, 0)}{splitPageId && renderPane(splitPageId, 1)}</div>
+        <div className={`editor-tabs-row ${rightTabs.length ? 'split' : ''}`}>{renderTabStrip(0)}{rightTabs.length > 0 && renderTabStrip(1)}</div>
+        <div className="workspace-toolbar" ref={setToolbarHost} />
+        <div className={`editor-panes ${rightTabs.length ? 'split' : ''} ${tabDropPane === 1 && !rightTabs.length ? 'drag-split-preview' : ''}`}>{renderPane(pageId, 0)}{rightTabs.length > 0 && renderPane(splitPageId, 1)}</div>
       </main>
     </div>
 
@@ -435,16 +511,23 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates }: {
   </div>;
 }
 
-interface TreeProps { node: TreeNode; nodes: TreeNode[]; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void }
+interface TreeProps { node: TreeNode; nodes: TreeNode[]; documentIds: Set<string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void }
 function TreeItem(props: TreeProps) {
-  const { node, nodes, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove } = props;
+  const { node, nodes, documentIds, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove, onImportFiles, onPickDocuments } = props;
   const children = childrenOf(nodes, node.id);
   const expandable = node.kind !== 'page';
   const menu = openMenuId === node.id;
   const [drop, setDrop] = useState(false);
+  const dropSection = node.kind === 'section' ? node.id : node.kind === 'page' ? node.parent_id : nodes.find((candidate) => {
+    if (candidate.kind !== 'section') return false;
+    let parentId = candidate.parent_id;
+    while (parentId) { if (parentId === node.id) return true; parentId = nodes.find((item) => item.id === parentId)?.parent_id ?? null; }
+    return false;
+  })?.id;
   const activate = () => node.kind === 'notebook' || node.kind === 'folder' ? onToggle(node.id) : onSelect(node);
   const onDrop = (event: React.DragEvent) => {
     event.preventDefault(); event.stopPropagation(); setDrop(false);
+    if (event.dataTransfer.files.length) { if (dropSection) onImportFiles(Array.from(event.dataTransfer.files), dropSection); return; }
     const movingId = event.dataTransfer.getData('text/plain');
     const moving = nodes.find((item) => item.id === movingId);
     if (!moving || movingId === node.id) return;
@@ -452,12 +535,12 @@ function TreeItem(props: TreeProps) {
     else onMove(movingId, expandable ? node.id : node.parent_id, expandable ? null : node.id);
   };
   return <>
-    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
+    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && !dropSection) return; event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
       {expandable ? <button className="tree-chevron" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.title}`} onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}>{expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-chevron" />}
-      <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : node.kind === 'section' ? <Layers3 size={15} /> : <FileText size={15} />}</span>
+      <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : node.kind === 'section' ? <Layers3 size={15} /> : documentIds.has(node.id) ? <FileIcon size={15} /> : <FileText size={15} />}</span>
       <span className="tree-name" title={node.title}>{node.title}</span>
       <button className="tree-more" title={`${node.kind} actions`} aria-label={`${node.kind} actions for ${node.title}`} aria-haspopup="menu" aria-expanded={menu} onClick={(event) => { event.stopPropagation(); onOpenMenu(menu ? null : node.id); }}><MoreHorizontal size={15} /></button>
-      {menu && <div className="tree-menu" role="menu" onClick={(event) => event.stopPropagation()}>{(node.kind === 'notebook' || node.kind === 'folder') && <><button role="menuitem" onClick={() => { onCreate('folder', node.id); onOpenMenu(null); }}>New folder</button><button role="menuitem" onClick={() => { onCreate('section', node.id); onOpenMenu(null); }}>New section</button></>}<button role="menuitem" onClick={() => { onRename(node); onOpenMenu(null); }}>Rename</button><button role="menuitem" className="danger" onClick={() => { onDelete(node); onOpenMenu(null); }}>Delete</button></div>}
+      {menu && <div className="tree-menu" role="menu" onClick={(event) => event.stopPropagation()}>{(node.kind === 'notebook' || node.kind === 'folder') && <><button role="menuitem" onClick={() => { onCreate('folder', node.id); onOpenMenu(null); }}>New folder</button><button role="menuitem" onClick={() => { onCreate('section', node.id); onOpenMenu(null); }}>New section</button></>}{dropSection && <button role="menuitem" onClick={() => { onPickDocuments(dropSection); onOpenMenu(null); }}>Import documents…</button>}<button role="menuitem" onClick={() => { onRename(node); onOpenMenu(null); }}>Rename</button><button role="menuitem" className="danger" onClick={() => { onDelete(node); onOpenMenu(null); }}>Delete</button></div>}
     </div>
     {expandable && expanded.has(node.id) && <div role="group">{children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</div>}
   </>;

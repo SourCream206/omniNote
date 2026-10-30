@@ -99,7 +99,13 @@ class Marketplace {
     fs.mkdirSync(staging);
     try {
       for (const [name, bytes] of contents) fs.writeFileSync(path.join(staging, name), bytes, { flag: 'wx' });
-      fs.renameSync(staging, destination);
+      for (let attempt = 0; ; attempt++) {
+        try { fs.renameSync(staging, destination); break; }
+        catch (error) {
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code) || attempt >= 4) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+        }
+      }
     } catch (error) {
       fs.rmSync(staging, { recursive: true, force: true });
       throw error;

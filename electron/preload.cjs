@@ -4,6 +4,7 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   load: () => invoke('workspace:load'),
   createNode: (parentId, kind, title) => invoke('node:create', parentId, kind, title),
+  createDocumentPage: (sectionId, assetId) => invoke('document-page:create', sectionId, assetId),
   renameNode: (nodeId, title) => invoke('node:rename', nodeId, title),
   deleteNode: (nodeId) => invoke('node:delete', nodeId),
   moveNode: (nodeId, parentId, beforeId) => invoke('node:move', nodeId, parentId, beforeId),

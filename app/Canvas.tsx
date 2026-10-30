@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { pdfjs } from 'react-pdf';
 import StarterKit from '@tiptap/starter-kit';
@@ -13,8 +14,8 @@ import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout'): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; toolbarActions?: React.ReactNode; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -69,7 +70,7 @@ async function pdfPrintoutHeight(assetId: string, width: number) {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, toolbarActions, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [tool, setTool] = useState<CanvasTool>('text');
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
@@ -542,9 +543,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const contextObject = contextMenu?.objectId ? objects.find((object) => object.id === contextMenu.objectId) : null;
   const viewerFor = (format: string) => documentViewer(format, extensions);
 
-  return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
-    {focusMode && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button><button onClick={onToggleFocus} title="Exit full screen"><Minimize2 size={15} /> Exit full screen</button></div>}
-    {(!focusMode || focusToolsOpen) && <div className={`canvas-toolbar ${focusMode ? 'focus-floating' : ''}`}>
+  const toolbar = showToolbar && (!focusMode || focusToolsOpen) && <div className={`canvas-toolbar ${focusMode ? 'focus-floating' : ''}`}>
       <div className="tool-group"><ToolButton icon={<MousePointer2 size={16} />} name="Select" tool="select" active={tool} onClick={updateTool} /><ToolButton icon={<Type size={16} />} name="Text" tool="text" active={tool} onClick={updateTool} /><button title="Add sticky note" onClick={() => { const point = centerWorld(); createText(point.x - 150, point.y - 80, '', true); }}><StickyNote size={16} /><span>Sticky Note</span></button></div>
       <div className="toolbar-divider" />
       <div className="tool-group"><ToolButton icon={<PenLine size={16} />} name="Pen" tool="pen" active={tool} onClick={updateTool} /><ToolButton icon={<Highlighter size={16} />} name="Highlight" tool="highlighter" active={tool} onClick={updateTool} /><ToolButton icon={<Eraser size={16} />} name="Erase" tool="eraser" active={tool} onClick={updateTool} /><ToolButton icon={<Scan size={16} />} name="Lasso" tool="lasso" active={tool} onClick={updateTool} /><ToolButton icon={<Hand size={16} />} name="Pan" tool="hand" active={tool} onClick={updateTool} /></div>
@@ -554,7 +553,10 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         {toolbarActions && <div className="canvas-toolbar-actions">{toolbarActions}</div>}
       <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<button title="Canvas full screen" onClick={onToggleFocus}><Maximize2 size={16} /></button></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
-    </div>}
+    </div>;
+  return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
+    {focusMode && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button><button onClick={onToggleFocus} title="Exit full screen"><Minimize2 size={15} /> Exit full screen</button></div>}
+    {toolbar && (toolbarPortalTarget && !focusMode ? createPortal(toolbar, toolbarPortalTarget) : toolbar)}
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const point = screen(event.nativeEvent); const position = world(point); const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId) ?? [...objectsRef.current].sort((a, b) => b.z_index - a.z_index).find((item) => position.x >= item.x && position.x <= item.x + item.width && position.y >= item.y && position.y <= item.y + item.height); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point, objectId: object?.id ?? null }); setAttachmentMenuId(null); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>

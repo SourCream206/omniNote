@@ -378,3 +378,38 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .focus-mode .editor-pane.active { border:0; }
 @media(max-width:1250px) { .canvas-toolbar-actions .header-button, .canvas-toolbar-actions .paper-button { font-size:0; gap:2px; } .canvas-toolbar-actions .header-button svg, .canvas-toolbar-actions .paper-button svg { flex:0 0 auto; } }
 @media print { .window-titlebar, .page-tabs, .pane-caption, .editor-pane:not(.active) { display:none !important; } .editor-panes { padding:0; } }
+
+/* Editor groups share one tool row beneath their tabs. */
+.editor-tabs-row { height:39px; flex:0 0 39px; min-width:0; display:flex; background:var(--ui-surface); }
+.editor-tabs-row .page-tabs { flex:1 1 0; }
+.editor-tabs-row.split .page-tabs:first-child { border-right:1px solid var(--ui-line); }
+.workspace-toolbar { height:39px; flex:0 0 39px; position:relative; z-index:40; background:var(--ui-surface); }
+.workspace-toolbar > .canvas-toolbar { width:100%; height:39px; padding:0 10px; }
+.editor-panes { padding:0; }
+.editor-panes.split { gap:0; }
+.editor-panes.split .editor-pane { border:0; }
+.editor-panes.split .editor-pane + .editor-pane { border-left:1px solid var(--ui-line); }
+.editor-panes.split .editor-pane.active { border-color:var(--ui-accent); }
+.editor-pane .canvas-shell { border:0; border-radius:0; box-shadow:none; }
+.editor-pane .canvas-shell > .rich-toolbar { top:0; }
+.editor-pane .focus-canvas > .rich-toolbar { top:88px; }
+.page-tab { cursor:grab; }
+.page-tab:active { cursor:grabbing; }
+.editor-panes.drag-split-preview { position:relative; }
+.editor-panes.drag-split-preview::after { content:""; position:absolute; inset:0 0 0 50%; background:color-mix(in srgb,var(--ui-accent) 12%,transparent); border:2px solid var(--ui-accent); pointer-events:none; z-index:30; }
+.focus-mode .editor-tabs-row, .focus-mode .workspace-toolbar { display:none; }
+@media print { .editor-tabs-row, .workspace-toolbar { display:none !important; } }
+
+.document-page { min-width:0; min-height:0; flex:1; display:flex; flex-direction:column; background:#fff; }
+.document-page .document-body { flex:1; min-height:0; }
+.document-page .pdf-content { height:100%; padding:12px; }
+.document-page .pdf-page-slot { margin:0 auto 12px; max-width:100%; }
+.document-page .pdf-page-slot .react-pdf__Page { margin:0 auto; }
+.document-page-toolbar { height:39px; display:flex; align-items:center; gap:8px; padding:0 12px; border-bottom:1px solid var(--ui-line); color:var(--ui-text); background:var(--ui-surface); }
+.document-page-toolbar .document-format { font-size:10px; font-weight:700; color:var(--ui-accent); }
+.document-page-name { min-width:0; flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--ui-muted); font-size:11px; }
+.document-page-toolbar button, .document-page-fallback button { display:flex; align-items:center; gap:6px; border:0; border-radius:5px; background:transparent; color:var(--ui-text); padding:6px 8px; font-size:11px; }
+.document-page-toolbar button:hover, .document-page-fallback button:hover { background:var(--ui-hover); color:var(--ui-accent); }
+.document-page-fallback { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:9px; color:#67768b; }
+.document-page-fallback strong { max-width:80%; overflow-wrap:anywhere; text-align:center; color:#263244; }
+.document-page-fallback p { margin:0; font-size:11px; }

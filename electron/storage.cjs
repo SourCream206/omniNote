@@ -42,7 +42,7 @@ class WorkspaceStore {
 
   migrate() {
     const version = this.db.prepare('PRAGMA user_version').get().user_version;
-    if (version > 2) throw new Error(`Workspace schema ${version} is newer than this app`);
+    if (version > 3) throw new Error(`Workspace schema ${version} is newer than this app`);
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE nodes (
@@ -79,6 +79,11 @@ class WorkspaceStore {
       this.db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(2, now());
       this.db.exec('PRAGMA user_version=2');
     });
+    if (version < 3) this.transaction(() => {
+      this.db.exec('CREATE TABLE document_pages (page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE, asset_id TEXT NOT NULL REFERENCES assets(id))');
+      this.db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(3, now());
+      this.db.exec('PRAGMA user_version=3');
+    });
   }
 
   seed() {
@@ -113,6 +118,16 @@ class WorkspaceStore {
   createNode(parentId, kind, title) {
     if (typeof title !== 'string' || title.length > 200) throw new Error('Invalid title');
     return this.transaction(() => this.insertNode(parentId ?? null, kind, title));
+  }
+
+  createDocumentPage(sectionId, assetId) {
+    const asset = this.db.prepare('SELECT * FROM assets WHERE id=?').get(assetId);
+    if (!asset) throw new Error('Asset not found');
+    return this.transaction(() => {
+      const pageId = this.insertNode(sectionId, 'page', asset.original_name);
+      this.db.prepare('INSERT INTO document_pages VALUES (?, ?)').run(pageId, assetId);
+      return pageId;
+    });
   }
 
   renameNode(nodeId, title) {
@@ -156,10 +171,11 @@ class WorkspaceStore {
 
   load() {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       directory: this.directory,
       nodes: this.db.prepare('SELECT * FROM nodes ORDER BY order_index, created_at').all(),
       pages: this.db.prepare('SELECT * FROM pages').all(),
+      documentPages: this.db.prepare('SELECT * FROM document_pages').all(),
       objects: this.db.prepare('SELECT * FROM objects ORDER BY z_index').all().map((row) => ({ ...row, payload: JSON.parse(row.payload_json) })),
       assets: this.db.prepare('SELECT * FROM assets').all(),
     };
