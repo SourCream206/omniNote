@@ -8,14 +8,15 @@ import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import { FontSize, TextStyle } from '@tiptap/extension-text-style';
-import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Scissors, ClipboardPaste, Files, Trash2, Minus, Plus, Maximize2, Minimize2, ChevronDown, Type, StickyNote, Move, File } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Scissors, ClipboardPaste, Files, Trash2, Minus, Plus, Maximize2, ChevronDown, Type, StickyNote, Move, File } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
+import FullscreenControl, { type FullscreenScope } from './FullscreenControl';
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; onToggleFocus(): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -70,7 +71,7 @@ async function pdfPrintoutHeight(assetId: string, width: number) {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, splitView, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
@@ -191,13 +192,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (adjusted.some((object, index) => object !== current[index])) updateObjects(adjusted);
   }, [page.id, extensions]);
 
-  function record(before: CanvasObject[]) {
-    if (JSON.stringify(before) === JSON.stringify(objectsRef.current)) return;
+  function record(before: CanvasObject[], after = objectsRef.current) {
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
     history.current.past.push(before);
     if (history.current.past.length > 100) history.current.past.shift();
     history.current.future = [];
   }
-  function commit(next: CanvasObject[]) { record(objectsRef.current); updateObjects(next); }
+  function commit(next: CanvasObject[]) { record(objectsRef.current, next); updateObjects(next); }
   function undo() {
     const previous = history.current.past.pop(); if (!previous) return;
     history.current.future.push(clone(objectsRef.current)); updateObjects(previous); updateSelected([]);
@@ -486,6 +487,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (!showToolbar) return;
       const target = event.target as HTMLElement;
       const editing = target.closest('.ProseMirror, input, textarea, select');
       if (event.code === 'Space' && !editing) { spaceHeld.current = true; event.preventDefault(); }
@@ -503,10 +505,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const keyup = (event: KeyboardEvent) => { if (event.code === 'Space') spaceHeld.current = false; };
     window.addEventListener('keydown', keydown); window.addEventListener('keyup', keyup);
     return () => { window.removeEventListener('keydown', keydown); window.removeEventListener('keyup', keyup); };
-  }, []);
+  }, [showToolbar]);
 
   useEffect(() => {
     const pasteFromClipboard = (event: ClipboardEvent) => {
+      if (!showToolbar) return;
       const clipboard = event.clipboardData;
       if (!clipboard || (event.target as HTMLElement).closest('input, textarea, select')) return;
       const files = Array.from(clipboard.items).filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter((file): file is File => Boolean(file));
@@ -533,7 +536,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     };
     document.addEventListener('paste', pasteFromClipboard);
     return () => document.removeEventListener('paste', pasteFromClipboard);
-  }, [page.id, onAssetImported]);
+  }, [page.id, onAssetImported, showToolbar]);
 
   const margin = 250;
   const worldView = { minX: (-camera.x - margin) / camera.zoom, minY: (-camera.y - margin) / camera.zoom, maxX: (viewportSize.width - camera.x + margin) / camera.zoom, maxY: (viewportSize.height - camera.y + margin) / camera.zoom };
@@ -551,11 +554,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       <div className="tool-group"><label className="color-control" title="Ink color"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /></label><input className="width-slider" aria-label="Pen width" type="range" min="1" max="24" value={width} onChange={(event) => setWidth(Number(event.target.value))} /><span className="width-value">{width}px</span>{tool === 'eraser' && <label className="partial-toggle"><input type="checkbox" checked={partialEraser} onChange={(event) => setPartialEraser(event.target.checked)} /> Partial</label>}</div>
         <div className="toolbar-spacer" />
         {toolbarActions && <div className="canvas-toolbar-actions">{toolbarActions}</div>}
-      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<button title="Canvas full screen" onClick={onToggleFocus}><Maximize2 size={16} /></button></div>
+      <div className="tool-group right"><button title="Undo" onClick={undo}><Undo2 size={16} /></button><button title="Redo" onClick={redo}><Redo2 size={16} /></button>{selectedObject?.type === 'text' && <button title="Toggle text formatting" aria-expanded={formatOpen} onClick={() => setFormatOpen((open) => !open)}><Type size={16} /></button>}<FullscreenControl splitView={splitView} onEnter={onToggleFocus} /></div>
       {extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.toolbar ?? []).map((entry) => <button className="extension-command" key={entry.command} onClick={() => onRunExtension(entry.command)}>{entry.label}</button>)}
     </div>;
   return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
-    {focusMode && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button><button onClick={onToggleFocus} title="Exit full screen"><Minimize2 size={15} /> Exit full screen</button></div>}
+    {focusMode && showToolbar && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button></div>}
     {toolbar && (toolbarPortalTarget && !focusMode ? createPortal(toolbar, toolbarPortalTarget) : toolbar)}
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const point = screen(event.nativeEvent); const position = world(point); const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId) ?? [...objectsRef.current].sort((a, b) => b.z_index - a.z_index).find((item) => position.x >= item.x && position.x <= item.x + item.width && position.y >= item.y && position.y <= item.y + item.height); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point, objectId: object?.id ?? null }); setAttachmentMenuId(null); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>

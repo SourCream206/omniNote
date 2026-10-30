@@ -10,9 +10,9 @@ const validTypes = new Set(['text', 'ink', 'image', 'audio', 'video', 'document'
 const paperStyles = new Set(['blank', 'dots', 'grid', 'lines']);
 const allowedParents = {
   notebook: [null],
-  folder: ['notebook', 'folder'],
-  section: ['notebook', 'folder'],
-  page: ['section'],
+  folder: ['notebook', 'folder', 'section'],
+  section: ['notebook', 'folder', 'section'],
+  page: ['notebook', 'folder', 'section'],
 };
 
 class WorkspaceStore {
@@ -89,9 +89,9 @@ class WorkspaceStore {
   seed() {
     if (this.db.prepare('SELECT COUNT(*) AS count FROM nodes').get().count) return;
     this.transaction(() => {
-      const notebook = this.insertNode(null, 'notebook', 'My Notebook');
-      const section = this.insertNode(notebook, 'section', 'General');
-      this.insertNode(section, 'page', 'Untitled page');
+      const notebook = this.insertNode(null, 'notebook', 'My Notebook NB');
+      const folder = this.insertNode(notebook, 'folder', 'General');
+      this.insertNode(folder, 'page', 'Untitled page');
     });
   }
 

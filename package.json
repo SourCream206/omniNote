@@ -9,7 +9,7 @@
     "start": "npm run build && electron .",
     "ink-lab": "tsc -p tsconfig.json && electron . --ink-lab",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.app.json --noEmit",
-    "test": "node scripts/test-storage.cjs && node scripts/document-fixtures.cjs && node scripts/test-protocol.cjs && node scripts/test-marketplace.cjs && node scripts/test-distribution.cjs",
+    "test": "node scripts/test-storage.cjs && node scripts/test-workspace-path.cjs && node scripts/document-fixtures.cjs && node scripts/test-protocol.cjs && node scripts/test-marketplace.cjs && node scripts/test-distribution.cjs",
     "marketplace:example": "node scripts/build-marketplace-example.cjs",
     "pack:win": "npm run build && electron-builder --config electron-builder.config.cjs --dir --win --publish never",
     "dist:win": "node scripts/check-release-config.cjs && npm run build && electron-builder --config electron-builder.config.cjs --win nsis --publish never"

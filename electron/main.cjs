@@ -8,6 +8,7 @@ const { createWorkspaceArchive } = require('./export.cjs');
 const { resolveAppFile } = require('./protocol-path.cjs');
 const { Marketplace } = require('./marketplace.cjs');
 const { config: distribution, hasUpdateSource } = require('./distribution.cjs');
+const { workspaceDirectory } = require('./workspace-path.cjs');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -74,6 +75,7 @@ function registerIpc() {
   });
 
   handle('workspace:load', () => store.load());
+  handle('workspace:open-folder', async () => { const error = await shell.openPath(store.directory); if (error) throw new Error(error); });
   handle('node:create', (parentId, kind, title) => store.createNode(parentId, kind, title));
   handle('document-page:create', (sectionId, assetId) => store.createDocumentPage(sectionId, assetId));
   handle('node:rename', (nodeId, title) => store.renameNode(nodeId, title));
@@ -196,7 +198,12 @@ app.setPath('userData', stableUserData);
 
 app.whenReady().then(() => {
   app.setName('omniNote');
-  const workspacePath = process.env.WHITEBOARD_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
+  let workspacePath;
+  try { workspacePath = workspaceDirectory(process.platform === 'win32' ? path.join(app.getPath('home'), 'Documents') : app.getPath('documents'), app.getPath('userData'), process.env.WHITEBOARD_WORKSPACE); }
+  catch (error) {
+    dialog.showErrorBox('Workspace migration failed', `${error.message}\n\nThe previous workspace remains at ${path.join(app.getPath('userData'), 'workspace')}.`);
+    workspacePath = path.join(app.getPath('userData'), 'workspace');
+  }
   store = new WorkspaceStore(workspacePath);
   marketplace = new Marketplace(store, process.env.OMNINOTE_MARKETPLACE_URL || distribution.marketplaceUrl, { allowHttpLoopback: !app.isPackaged });
   const exampleSource = path.join(projectRoot, 'examples', 'date-insert');

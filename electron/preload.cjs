@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   load: () => invoke('workspace:load'),
+  openWorkspaceFolder: () => invoke('workspace:open-folder'),
   createNode: (parentId, kind, title) => invoke('node:create', parentId, kind, title),
   createDocumentPage: (sectionId, assetId) => invoke('document-page:create', sectionId, assetId),
   renameNode: (nodeId, title) => invoke('node:rename', nodeId, title),
