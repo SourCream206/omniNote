@@ -17,6 +17,7 @@ export default function App() {
   const [pageId, setPageId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [openTreeMenuId, setOpenTreeMenuId] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<'explorer' | 'extensions' | 'settings' | null>('explorer');
   const [theme, setTheme] = useState<ThemeId>(readTheme);
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
@@ -80,6 +81,18 @@ export default function App() {
     document.addEventListener('keydown', closeOnEscape);
     return () => { document.removeEventListener('pointerdown', closeMenus, true); document.removeEventListener('keydown', closeOnEscape); };
   }, []);
+
+  useEffect(() => {
+    const closeMenu = (event: PointerEvent) => {
+      if (!(event.target as HTMLElement).closest('.tree-menu, .tree-more')) setOpenTreeMenuId(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenTreeMenuId(null); };
+    document.addEventListener('pointerdown', closeMenu, true);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.removeEventListener('pointerdown', closeMenu, true); document.removeEventListener('keydown', closeOnEscape); };
+  }, []);
+
+  useEffect(() => { if (activePanel !== 'explorer') setOpenTreeMenuId(null); }, [activePanel]);
 
   async function toggleFocus() {
     try {
@@ -286,7 +299,7 @@ export default function App() {
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks">
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={pageId} onSelect={(selected) => { if (selected.kind === 'section') { setSectionId(selected.id); setPageId(firstPageIn(nodes, selected.id)); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') { setPageId(selected.id); setSectionId(selected.parent_id); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
+          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={pageId} onSelect={(selected) => { if (selected.kind === 'section') { setSectionId(selected.id); setPageId(firstPageIn(nodes, selected.id)); setExpanded((before) => new Set([...before, selected.id])); } else if (selected.kind === 'page') { setPageId(selected.id); setSectionId(selected.parent_id); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onMove={moveNode} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -353,12 +366,12 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates }: {
   </div>;
 }
 
-interface TreeProps { node: TreeNode; nodes: TreeNode[]; depth: number; expanded: Set<string>; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void }
+interface TreeProps { node: TreeNode; nodes: TreeNode[]; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onMove(nodeId: string, parentId: string | null, beforeId?: string | null): void }
 function TreeItem(props: TreeProps) {
-  const { node, nodes, depth, expanded, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove } = props;
+  const { node, nodes, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, onToggle, onSelect, onCreate, onRename, onDelete, onMove } = props;
   const children = childrenOf(nodes, node.id);
   const expandable = node.kind !== 'page';
-  const [menu, setMenu] = useState(false);
+  const menu = openMenuId === node.id;
   const [drop, setDrop] = useState(false);
   const activate = () => node.kind === 'notebook' || node.kind === 'folder' ? onToggle(node.id) : onSelect(node);
   const onDrop = (event: React.DragEvent) => {
@@ -370,12 +383,12 @@ function TreeItem(props: TreeProps) {
     else onMove(movingId, expandable ? node.id : node.parent_id, expandable ? null : node.id);
   };
   return <>
-    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
+    <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${drop ? 'drop-target' : ''}`} style={{ paddingLeft: 8 + depth * 17 }} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} draggable onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.setData('text/plain', node.id); }} onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); setDrop(true); }} onDragLeave={() => setDrop(false)} onDrop={onDrop} onClick={activate} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); onRename(node); }}>
       {expandable ? <button className="tree-chevron" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.title}`} onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}>{expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-chevron" />}
       <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' ? <FolderPlus size={15} /> : node.kind === 'section' ? <Layers3 size={15} /> : <FileText size={15} />}</span>
       <span className="tree-name" title={node.title}>{node.title}</span>
-      <button className="tree-more" title={`${node.kind} actions`} aria-label={`${node.kind} actions for ${node.title}`} onClick={(event) => { event.stopPropagation(); setMenu(!menu); }}><MoreHorizontal size={15} /></button>
-      {menu && <div className="tree-menu" onClick={(event) => event.stopPropagation()}>{(node.kind === 'notebook' || node.kind === 'folder') && <><button onClick={() => { onCreate('folder', node.id); setMenu(false); }}>New folder</button><button onClick={() => { onCreate('section', node.id); setMenu(false); }}>New section</button></>}<button onClick={() => { onRename(node); setMenu(false); }}>Rename</button><button className="danger" onClick={() => { onDelete(node); setMenu(false); }}>Delete</button></div>}
+      <button className="tree-more" title={`${node.kind} actions`} aria-label={`${node.kind} actions for ${node.title}`} aria-haspopup="menu" aria-expanded={menu} onClick={(event) => { event.stopPropagation(); onOpenMenu(menu ? null : node.id); }}><MoreHorizontal size={15} /></button>
+      {menu && <div className="tree-menu" role="menu" onClick={(event) => event.stopPropagation()}>{(node.kind === 'notebook' || node.kind === 'folder') && <><button role="menuitem" onClick={() => { onCreate('folder', node.id); onOpenMenu(null); }}>New folder</button><button role="menuitem" onClick={() => { onCreate('section', node.id); onOpenMenu(null); }}>New section</button></>}<button role="menuitem" onClick={() => { onRename(node); onOpenMenu(null); }}>Rename</button><button role="menuitem" className="danger" onClick={() => { onDelete(node); onOpenMenu(null); }}>Delete</button></div>}
     </div>
     {expandable && expanded.has(node.id) && <div role="group">{children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</div>}
   </>;
