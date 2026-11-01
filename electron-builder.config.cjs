@@ -14,6 +14,7 @@ module.exports = {
     '!node_modules/react/**', '!node_modules/react-dom/**', '!node_modules/react-pdf/**',
   ],
   win: { target: 'nsis' },
+  linux: { target: 'AppImage', category: 'Office', artifactName: '${productName}-${version}-linux-${arch}.${ext}' },
   nsis: { oneClick: false, perMachine: false, createDesktopShortcut: true, createStartMenuShortcut: true, artifactName: '${productName}-Setup-${version}.${ext}' },
   publish: releaseRepo ? [{ provider: 'github', ...releaseRepo, private: config.githubPrivate === true }] : config.updateUrl ? [{ provider: 'generic', url: config.updateUrl }] : undefined,
 };

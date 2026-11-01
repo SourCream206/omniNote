@@ -1,4 +1,4 @@
-name: Release Windows app
+name: Release desktop app
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,8 +22,49 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run dist:win
-      - name: Publish installer and update feed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            release/omniNote-Setup-*.exe
+            release/latest.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Check tag and package version
+        shell: bash
+        run: test "$GITHUB_REF_NAME" = "v$(node -p 'require("./package.json").version')"
+      - run: npm ci
+      - run: npm test
+      - run: npm run dist:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: |
+            release/*.AppImage
+            release/latest-linux.yml
+          if-no-files-found: error
+
+  release:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-release'
+          merge-multiple: true
+          path: release
+      - name: Publish installers and update feeds
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/omniNote-Setup-*.exe release/latest.yml release/*.blockmap --generate-notes
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" release/omniNote-Setup-*.exe release/*.AppImage release/latest.yml release/latest-linux.yml release/*.blockmap --generate-notes
