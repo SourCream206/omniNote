@@ -36,7 +36,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v29 | Tagged Windows release workflow | GitHub Actions checks that a `v*` tag matches `package.json`, runs the test suite, builds an NSIS installer, and publishes it with `latest.yml` and blockmap. A version-to-version installation still needs a second release and an installed app check. |
 | v30 | Second packaged update test version | `package.json` and lockfile move to 0.0.2 so an installed 0.0.1 build has a newer release to detect. GitHub Actions runs the tests and publishes matching update metadata; an installed-client result is recorded separately after release. |
 | v31 | One-click update completion | A real 0.0.1→0.0.2 installation detected the release, showed Yes/Ignore/Cancel, downloaded and upgraded, and retained an isolated test note. The NSIS wizard required an extra Install click, so the updater now requests a silent install and app relaunch for the next release. |
-| v32 | Silent-update verification version | Package version 0.0.4 gives the installed 0.0.3 client a newer release for a real update check. The build and release workflow tests the tagged package; the installed-client outcome is recorded after verification. |
+| v32 | Silent-update verification version | Build and CI tests passed. An installed 0.0.3 client detected release 0.0.4, showed Yes/Ignore/Cancel, then downloaded and installed it without another wizard step. The executable reports 0.0.4, the app reopened, and the isolated test note remained in SQLite. |
 
 ## v3 hands-on checks
 
@@ -52,5 +52,5 @@ The PDF/DOCX fixtures prove that their link structures reach the built-in viewer
 
 1. Create a section and multiple pages. The pages should appear nested under that section in the explorer. Collapse a section, resize the explorer from its right edge, then collapse the whole explorer from the activity rail. The page canvas should expand.
 2. Open **Export** and confirm the only export entry point lists **Page as PDF** and **Workspace backup ZIP**. Save and inspect both files.
-3. Choose Blank, Dots, Grid, and Lines from **Paper**. Pan and zoom, then reopen the app to confirm each page retains its choice. Select a text object to reveal the formatting row; use its toggle to hide and show that row. Open **More object actions** for grouping, order, copy, and delete.
+3. Choose Blank, Dots, Grid, and Lines from **Paper**. Pan and zoom, then reopen the app to confirm each page retains its choice. Select a text object to reveal the formatting row; use its toggle to hide and show that row. Right-click an object for grouping, order, copy, and delete.
 4. Follow [EXTENSIONS.md](EXTENSIONS.md) to test the broader demo in an isolated workspace. Review its requested capabilities before enabling it.
