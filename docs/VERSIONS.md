@@ -35,6 +35,7 @@ Each `vN:` commit on `main` is a source-run checkpoint. Use Node.js 22.12+, `npm
 | v28 | Hosted extension catalog and quieter Extensions sidebar | Build and tests; generated and published a first-party catalog through GitHub Pages, verified live catalog retrieval and a marketplace install. The Extensions sidebar shows installed items and catalog results with fewer repeated labels. The updater remains configured for GitHub Releases; no version-to-version installation has been verified yet. |
 | v29 | Tagged Windows release workflow | GitHub Actions checks that a `v*` tag matches `package.json`, runs the test suite, builds an NSIS installer, and publishes it with `latest.yml` and blockmap. A version-to-version installation still needs a second release and an installed app check. |
 | v30 | Second packaged update test version | `package.json` and lockfile move to 0.0.2 so an installed 0.0.1 build has a newer release to detect. GitHub Actions runs the tests and publishes matching update metadata; an installed-client result is recorded separately after release. |
+| v31 | One-click update completion | A real 0.0.1→0.0.2 installation detected the release, showed Yes/Ignore/Cancel, downloaded and upgraded, and retained an isolated test note. The NSIS wizard required an extra Install click, so the updater now requests a silent install and app relaunch for the next release. |
 
 ## v3 hands-on checks
 

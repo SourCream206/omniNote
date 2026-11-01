@@ -61,7 +61,7 @@ function configureUpdates() {
   });
   autoUpdater.on('update-downloaded', (info) => {
     setUpdateStatus('downloaded', `Version ${info.version} is ready to install.`, info.version);
-    if (installAfterDownload) autoUpdater.quitAndInstall();
+    if (installAfterDownload) autoUpdater.quitAndInstall(true, true);
   });
   const check = () => autoUpdater.checkForUpdates().catch((error) => setUpdateStatus('error', error.message));
   setTimeout(check, 15000);
@@ -119,7 +119,7 @@ function registerIpc() {
       ignoreUpdateVersion(version);
       setUpdateStatus('ignored', `Version ${version} was ignored.`, version);
     } else if (choice.response === 0) {
-      if (updateStatus.state === 'downloaded') autoUpdater.quitAndInstall();
+      if (updateStatus.state === 'downloaded') autoUpdater.quitAndInstall(true, true);
       else {
         installAfterDownload = true;
         setUpdateStatus('downloading', `Downloading version ${version}…`, version);
