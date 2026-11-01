@@ -65,7 +65,7 @@
         if (!installer || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return;
         document.getElementById('download-link').href = installer.browser_download_url;
         document.getElementById('version-label').textContent = `Version ${release.tag_name.slice(1)} · .exe`;
-        const linux = release.assets.find((asset) => /^omniNote-\d+\.\d+\.\d+-linux-x64\.AppImage$/.test(asset.name));
+        const linux = release.assets.find((asset) => /^omniNote-\d+\.\d+\.\d+-linux-x86_64\.AppImage$/.test(asset.name));
         if (linux) {
           document.getElementById('linux-link').href = linux.browser_download_url;
           document.getElementById('linux-version').textContent = `Version ${release.tag_name.slice(1)} · x86_64`;
