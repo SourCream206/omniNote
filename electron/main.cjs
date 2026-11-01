@@ -9,6 +9,7 @@ const { resolveAppFile } = require('./protocol-path.cjs');
 const { Marketplace } = require('./marketplace.cjs');
 const { config: distribution, hasUpdateSource } = require('./distribution.cjs');
 const { workspaceDirectory } = require('./workspace-path.cjs');
+const { assertSafeToOpen, readSelectedFile } = require('./selected-file.cjs');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'whiteboard', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -151,10 +152,14 @@ function registerIpc() {
   handle('asset:pick', async () => {
     const result = await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] });
     if (result.canceled) return [];
-    return result.filePaths.map((filePath) => store.importAsset(path.basename(filePath), '', fs.readFileSync(filePath)));
+    const imported = [];
+    for (const filePath of result.filePaths) imported.push(store.importAsset(path.basename(filePath), '', await readSelectedFile(filePath)));
+    return imported;
   });
   handle('asset:open', async (assetId) => {
-    const result = await shell.openPath(store.assetPath(assetId).absolutePath);
+    const { asset, absolutePath } = store.assetPath(assetId);
+    assertSafeToOpen(asset.original_name);
+    const result = await shell.openPath(absolutePath);
     if (result) throw new Error(result);
   });
   handle('link:open', async (rawUrl) => {

@@ -257,7 +257,11 @@ class WorkspaceStore {
   assetPath(assetId) {
     const asset = this.db.prepare('SELECT * FROM assets WHERE id=?').get(assetId);
     if (!asset) throw new Error('Asset not found');
-    return { asset, absolutePath: path.join(this.directory, asset.relative_path) };
+    const assetRoot = fs.realpathSync(this.assetDir);
+    const absolutePath = fs.realpathSync(path.resolve(this.directory, asset.relative_path));
+    const relative = path.relative(assetRoot, absolutePath);
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Asset path escapes the workspace');
+    return { asset, absolutePath };
   }
 
   readAsset(assetId) {
