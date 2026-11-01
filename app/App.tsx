@@ -539,7 +539,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : activePanel === 'extensions' ? <ExtensionsPanel directory={snapshot.directory} extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
+        </> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area" style={{ '--split-percent': `${splitRatio}%` } as React.CSSProperties}>
@@ -557,7 +557,7 @@ export default function App() {
     {toast && <div className="toast" role="status">{toast}<button aria-label="Dismiss notification" onClick={() => setToast('')}><X size={13} /></button></div>}
   </div>;
 }
-function ExtensionsPanel({ directory, extensions, onToggle, onSetting, onSearch, onInstall }: { directory: string; extensions: ExtensionInfo[]; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void; onSearch(query: string): Promise<MarketplaceSearch>; onInstall(entry: MarketplaceEntry): Promise<void> }) {
+function ExtensionsPanel({ extensions, onToggle, onSetting, onSearch, onInstall }: { extensions: ExtensionInfo[]; onToggle(item: ExtensionInfo, enabled: boolean): void; onSetting(id: string, key: string, value: boolean | string): void; onSearch(query: string): Promise<MarketplaceSearch>; onInstall(entry: MarketplaceEntry): Promise<void> }) {
   const [query, setQuery] = useState('');
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const visible = extensions.filter((item) => `${item.manifest.name} ${item.manifest.id} ${item.manifest.version}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -567,14 +567,13 @@ function ExtensionsPanel({ directory, extensions, onToggle, onSetting, onSearch,
     <div className="extensions-list">
       <div className="marketplace-section-label">Installed</div>
       {visible.map((item) => <div className="extension-entry" key={item.manifest.id}>
-        <div className="extension-entry-main"><Puzzle size={18} /><div><strong>{item.manifest.name}</strong><small>v{item.manifest.version} · {item.enabled ? 'Enabled' : 'Disabled'}</small></div><label className="mini-toggle" title={`${item.enabled ? 'Disable' : 'Enable'} ${item.manifest.name}`}><input type="checkbox" checked={item.enabled} onChange={(event) => onToggle(item, event.target.checked)} /></label></div>
-        <div className="extension-entry-detail"><span title={item.manifest.id}>{item.manifest.id}</span>{!!item.manifest.contributes.settings?.length && item.enabled && <button onClick={() => setSettingsId(settingsId === item.manifest.id ? null : item.manifest.id)} aria-expanded={settingsId === item.manifest.id}>Settings <ChevronDown size={12} /></button>}</div>
+        <div className="extension-entry-main" title={item.manifest.id}><Puzzle size={18} /><div><strong>{item.manifest.name}</strong><small>v{item.manifest.version} · {item.enabled ? 'Enabled' : 'Disabled'}</small></div><label className="mini-toggle" title={`${item.enabled ? 'Disable' : 'Enable'} ${item.manifest.name}`}><input type="checkbox" checked={item.enabled} onChange={(event) => onToggle(item, event.target.checked)} /></label></div>
+        {!!item.manifest.contributes.settings?.length && item.enabled && <div className="extension-entry-detail"><button onClick={() => setSettingsId(settingsId === item.manifest.id ? null : item.manifest.id)} aria-expanded={settingsId === item.manifest.id}>Settings <ChevronDown size={12} /></button></div>}
         {settingsId === item.manifest.id && item.enabled && <div className="extension-settings">{item.manifest.contributes.settings?.map((setting) => <label key={setting.key}>{setting.label}{setting.type === 'boolean' ? <input type="checkbox" checked={Boolean(item.settings[setting.key])} onChange={(event) => onSetting(item.manifest.id, setting.key, event.target.checked)} /> : <input type="text" key={`${item.manifest.id}:${setting.key}`} defaultValue={String(item.settings[setting.key] ?? '')} onBlur={(event) => onSetting(item.manifest.id, setting.key, event.target.value)} />}</label>)}</div>}
       </div>)}
       {!visible.length && <p className="extensions-empty">{query ? 'No installed extensions match your search.' : 'No local extensions found.'}</p>}
       <MarketplacePanel query={query} installedIds={new Set(extensions.map((item) => item.manifest.id))} search={onSearch} install={onInstall} />
     </div>
-    <p className="extensions-location" title={`${directory}\\extensions`}>Local extensions in <code>workspace/extensions</code></p>
   </div>;
 }
 

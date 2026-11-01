@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Download } from 'lucide-react';
 import type { MarketplaceEntry, MarketplaceSearch } from './types';
 
 export default function MarketplacePanel({ query, installedIds, search, install }: { query: string; installedIds: Set<string>; search(query: string): Promise<MarketplaceSearch>; install(entry: MarketplaceEntry): Promise<void> }) {
@@ -32,7 +31,7 @@ export default function MarketplacePanel({ query, installedIds, search, install 
     {!loading && !error && result?.configured && !result.entries.length && <p className="extensions-empty">No extensions found.</p>}
     {!loading && !error && result?.entries.map((entry) => <div className="marketplace-entry" key={`${entry.id}@${entry.version}`}>
       <div className="marketplace-entry-copy"><strong>{entry.name}</strong><small>{entry.id} · v{entry.version}</small><p>{entry.summary}</p></div>
-      <button type="button" disabled={installedIds.has(entry.id) || installing !== null} onClick={() => void installEntry(entry)} aria-label={`Install ${entry.name}`}><Download size={14} /> {installedIds.has(entry.id) ? 'Installed' : installing === entry.id ? 'Installing…' : 'Install'}</button>
+      <button type="button" disabled={installedIds.has(entry.id) || installing !== null} onClick={() => void installEntry(entry)} aria-label={`Install ${entry.name}`}>{installedIds.has(entry.id) ? 'Installed' : installing === entry.id ? 'Installing…' : 'Install'}</button>
     </div>)}
   </section>;
 }

@@ -147,7 +147,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .extension-entry-main>div { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
 .extension-entry-main strong { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; font-weight:650; }
 .extension-entry-main small, .extension-entry-detail { color:#7b8797; font-size:10px; }
-.extension-entry-detail { display:flex; align-items:center; justify-content:space-between; gap:5px; margin:6px 0 0 27px; }
+.extension-entry-detail { display:flex; align-items:center; justify-content:flex-start; gap:5px; margin:6px 0 0 27px; }
 .extension-entry-detail span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .extension-entry-detail button { flex:0 0 auto; display:flex; align-items:center; gap:2px; border:0; background:transparent; color:#48688b; padding:2px; font-size:10px; }
 .extension-settings { margin:9px 0 0 27px; display:grid; gap:8px; }

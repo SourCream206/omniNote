@@ -15,6 +15,7 @@ async function main() {
   fs.mkdirSync(output, { recursive: true });
   fs.writeFileSync(path.join(output, filename), archive);
   fs.writeFileSync(path.join(output, 'catalog.json'), JSON.stringify(catalog, null, 2));
+  fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>omniNote extensions</title><style>body{font:15px system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.5rem;color:#243247}h1{font-size:1.5rem}p{line-height:1.6;color:#52657c}a{color:#285f91}</style><h1>omniNote extensions</h1><p>Browse and install extensions from the Extensions sidebar in omniNote.</p><p><a href="catalog.json">View catalog</a></p>');
   console.log(`Marketplace example ready in ${output}`);
 }
 
