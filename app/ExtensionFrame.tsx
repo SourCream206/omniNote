@@ -5,12 +5,14 @@ const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsaf
 
 export default function ExtensionFrame({ extension, entry, kind, data, bytes, interactive, onError }: { extension: ExtensionInfo; entry: string; kind: 'canvas-object' | 'document'; data: unknown; bytes?: Uint8Array | null; interactive: boolean; onError(error: unknown): void }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const [source, setSource] = useState('');
+  const resourceKey = `${extension.manifest.id}:${entry}`;
+  const [resource, setResource] = useState({ key: '', html: '' });
+  const source = resource.key === resourceKey ? resource.html : '';
   useEffect(() => {
     let active = true;
-    window.whiteboard.extensionResource(extension.manifest.id, entry).then((html) => { if (active) setSource(html); }).catch(onError);
+    window.whiteboard.extensionResource(extension.manifest.id, entry).then((html) => { if (active) setResource({ key: resourceKey, html }); }).catch(onError);
     return () => { active = false; };
-  }, [extension.manifest.id, entry]);
+  }, [extension.manifest.id, entry, resourceKey]);
   useEffect(() => {
     if (!source) return;
     const send = () => frame.current?.contentWindow?.postMessage({ type: 'omninote:init', apiVersion: '1.0.0', kind, data, bytes, settings: extension.settings }, '*');

@@ -412,6 +412,13 @@ export default function App() {
     } : previous);
   }
 
+  function updateCamera(pageIdValue: string, camera: Camera) {
+    setSnapshot((previous) => previous ? {
+      ...previous,
+      pages: previous.pages.map((row) => row.id === pageIdValue ? { ...row, camera_x: camera.x, camera_y: camera.y, camera_zoom: camera.zoom } : row),
+    } : previous);
+  }
+
   async function changePaper(style: PaperStyle) {
     if (!activePageId) return;
     setPaperOpen(false);
@@ -445,7 +452,9 @@ export default function App() {
     try {
       const source = await window.whiteboard.extensionSource(extension.manifest.id);
       const blobUrl = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
-      const worker = new Worker(blobUrl);
+      let worker: Worker;
+      try { worker = new Worker(blobUrl); }
+      catch (error) { URL.revokeObjectURL(blobUrl); throw error; }
       const requestId = crypto.randomUUID();
       return await new Promise<boolean>((resolve) => {
         const finish = (success: boolean) => { clearTimeout(timer); worker.terminate(); URL.revokeObjectURL(blobUrl); resolve(success); };
@@ -502,7 +511,7 @@ export default function App() {
     const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
     const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
     return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
-      {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+      {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onCameraChange={updateCamera} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
     </div>;
   };
   const renderTabStrip = (pane: 0 | 1) => {

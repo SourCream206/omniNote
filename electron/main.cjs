@@ -82,6 +82,7 @@ function registerIpc() {
   handle('node:delete', (nodeId) => store.deleteNode(nodeId));
   handle('node:move', (nodeId, parentId, beforeId) => store.moveNode(nodeId, parentId, beforeId));
   handle('page:save', (pageId, objects, camera) => store.savePage(pageId, objects, camera));
+  handle('page:save-camera', (pageId, camera) => store.saveCamera(pageId, camera));
   ipcMain.on('page:save-sync', (event, pageId, objects, camera) => {
     try {
       if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) throw new Error('Invalid IPC sender');

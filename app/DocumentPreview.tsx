@@ -69,21 +69,25 @@ export default function DocumentPreview({ object, asset, viewer, interactive, fu
   useEffect(() => {
     if (!interactive || !html || !iframe.current) return;
     const frame = iframe.current;
+    let wiredDocument: globalThis.Document | null = null;
+    const openLink = (event: MouseEvent) => {
+      const anchor = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor) return;
+      const href = anchor.getAttribute('href') || '';
+      if (href.startsWith('#')) return;
+      event.preventDefault();
+      window.whiteboard.openExternal(href).catch(onError);
+    };
     const wire = () => {
       const document = frame.contentDocument;
-      if (!document) return;
-      document.addEventListener('click', (event) => {
-        const anchor = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
-        if (!anchor) return;
-        const href = anchor.getAttribute('href') || '';
-        if (href.startsWith('#')) return; // Native bookmark/TOC jump inside the frame.
-        event.preventDefault();
-        window.whiteboard.openExternal(href).catch(onError);
-      });
+      if (!document || wiredDocument === document) return;
+      wiredDocument?.removeEventListener('click', openLink);
+      document.addEventListener('click', openLink);
+      wiredDocument = document;
     };
     frame.addEventListener('load', wire);
     if (frame.contentDocument?.readyState === 'complete') wire();
-    return () => frame.removeEventListener('load', wire);
+    return () => { frame.removeEventListener('load', wire); wiredDocument?.removeEventListener('click', openLink); };
   }, [html, interactive, onError]);
 
   useEffect(() => { if (error) onPreviewFailure(); }, [error, onPreviewFailure]);

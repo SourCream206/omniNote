@@ -1,4 +1,4 @@
-import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, memo, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -17,7 +17,7 @@ import { documentViewer, previewFormats } from './documentViewers';
 const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onCameraChange(pageId: string, camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
 type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
@@ -58,13 +58,14 @@ async function pdfPrintoutHeight(assetId: string, width: number) {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, splitView, onToggleFocus, onObjectsChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, splitView, onToggleFocus, onObjectsChange, onCameraChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
   const [selected, setSelected] = useState<string[]>([]);
   const [activeDoc, setActiveDoc] = useState<string | null>(null);
   const [ink, setInk] = useState<{ points: InkPoint[]; highlighter: boolean } | null>(null);
+  const inkFrame = useRef<number | null>(null);
   const [lasso, setLasso] = useState<Point[]>([]);
   const [width, setWidth] = useState(4);
   const [color, setColor] = useState('#253454');
@@ -107,21 +108,35 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editRevision = useRef(0);
   const savedRevision = useRef(0);
+  const objectRevision = useRef(0);
+  const savedObjectRevision = useRef(0);
 
-  const updateObjects = (next: CanvasObject[]) => { objectsRef.current = next; setObjects(next); scheduleSave(next, cameraRef.current); };
-  const updateCamera = (next: Camera) => { cameraRef.current = next; setCamera(next); scheduleSave(objectsRef.current, next); };
+  const updateObjects = (next: CanvasObject[]) => { objectsRef.current = next; objectRevision.current++; setObjects(next); scheduleSave(); };
+  const updateCamera = (next: Camera) => { cameraRef.current = next; setCamera(next); scheduleSave(); };
   const updateSelected = (next: string[]) => { selectedRef.current = next; setSelected(next); setAttachmentMenuId((current) => current && next.includes(current) ? current : null); };
   const updateTool = (next: CanvasTool) => { toolRef.current = next; onToolChange(next); setActiveDoc(null); if (next !== 'select') updateSelected([]); };
 
-  function scheduleSave(nextObjects: CanvasObject[], nextCamera: Camera) {
-    const revision = ++editRevision.current;
+  function saveLatest(revision: number): Promise<void> {
+    const latestObjects = objectsRef.current;
+    const latestCamera = cameraRef.current;
+    const objectsAtSave = objectRevision.current;
+    const saveObjects = objectsAtSave > savedObjectRevision.current;
+    return (saveObjects ? window.whiteboard.savePage(page.id, latestObjects, latestCamera) : window.whiteboard.saveCamera(page.id, latestCamera)).then(() => {
+      savedRevision.current = Math.max(savedRevision.current, revision);
+      if (saveObjects) savedObjectRevision.current = Math.max(savedObjectRevision.current, objectsAtSave);
+      if (revision === editRevision.current) {
+        if (saveObjects) onObjectsChange(page.id, latestObjects, latestCamera);
+        else onCameraChange(page.id, latestCamera);
+      }
+    });
+  }
+
+  function scheduleSave() {
+    ++editRevision.current;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
-      window.whiteboard.savePage(page.id, nextObjects, nextCamera).then(() => {
-        savedRevision.current = Math.max(savedRevision.current, revision);
-        if (revision === editRevision.current) onObjectsChange(page.id, nextObjects, nextCamera);
-      }).catch(onError);
+      void saveLatest(editRevision.current).catch(onError);
     }, 400);
   }
 
@@ -129,12 +144,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     const revision = editRevision.current;
     if (revision <= savedRevision.current) return Promise.resolve();
-    const latestObjects = objectsRef.current;
-    const latestCamera = cameraRef.current;
-    return window.whiteboard.savePage(page.id, latestObjects, latestCamera).then(() => {
-      savedRevision.current = Math.max(savedRevision.current, revision);
-      if (revision === editRevision.current) onObjectsChange(page.id, latestObjects, latestCamera);
-    });
+    return saveLatest(revision);
   }
 
   useEffect(() => {
@@ -155,6 +165,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     return () => {
       observer.disconnect();
       window.removeEventListener('beforeunload', beforeUnload);
+      if (inkFrame.current !== null) cancelAnimationFrame(inkFrame.current);
       void flushPendingSave().catch(onError);
     };
     // Canvas is keyed by page ID; cleanup flushes its latest state.
@@ -180,7 +191,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }, [page.id, extensions]);
 
   function record(before: CanvasObject[], after = objectsRef.current) {
-    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    if (before === after || (before.length === after.length && before.every((object, index) => object === after[index]))) return;
     history.current.past.push(before);
     if (history.current.past.length > 100) history.current.past.shift();
     history.current.future = [];
@@ -188,11 +199,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   function commit(next: CanvasObject[]) { record(objectsRef.current, next); updateObjects(next); }
   function undo() {
     const previous = history.current.past.pop(); if (!previous) return;
-    history.current.future.push(clone(objectsRef.current)); updateObjects(previous); updateSelected([]);
+    history.current.future.push(objectsRef.current); updateObjects(previous); updateSelected([]);
   }
   function redo() {
     const next = history.current.future.pop(); if (!next) return;
-    history.current.past.push(clone(objectsRef.current)); updateObjects(next); updateSelected([]);
+    history.current.past.push(objectsRef.current); updateObjects(next); updateSelected([]);
   }
 
   function centerWorld(): Point {
@@ -284,7 +295,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const nextSelected = event.shiftKey ? [...new Set([...selectedRef.current, ...group])] : selectedRef.current.includes(object.id) ? selectedRef.current : group;
     updateSelected(nextSelected);
     const point = world(screen(event.nativeEvent));
-    gesture.current = { kind, pointerId: event.pointerId, start: point, camera: cameraRef.current, objects: clone(objectsRef.current), selected: nextSelected, targetId: object.id };
+    gesture.current = { kind, pointerId: event.pointerId, start: point, camera: cameraRef.current, objects: objectsRef.current, selected: nextSelected, targetId: object.id };
     viewport.current?.setPointerCapture(event.pointerId);
   }
 
@@ -316,7 +327,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     viewport.current?.setPointerCapture(event.pointerId);
     const kind: Gesture['kind'] = currentTool === 'hand' ? 'pan' : currentTool === 'eraser' ? 'erase' : currentTool === 'lasso' ? 'lasso' : 'draw';
     const initialPoint = sample(event.nativeEvent);
-    gesture.current = { kind, pointerId: event.pointerId, start: kind === 'pan' ? point : position, camera: cameraRef.current, objects: clone(objectsRef.current), selected: selectedRef.current, points: [initialPoint], lasso: [position] };
+    gesture.current = { kind, pointerId: event.pointerId, start: kind === 'pan' ? point : position, camera: cameraRef.current, objects: objectsRef.current, selected: selectedRef.current, points: [initialPoint], lasso: [position] };
     if (kind === 'draw') setInk({ points: [initialPoint], highlighter: currentTool === 'highlighter' });
     if (kind === 'lasso') setLasso([position]);
     if (kind === 'erase') updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser));
@@ -354,7 +365,10 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (current.kind === 'lasso') { current.lasso!.push(position); setLasso([...current.lasso!]); return; }
     const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
     for (const item of coalesced.length ? coalesced : [event.nativeEvent]) current.points!.push(sample(item));
-    setInk({ points: [...current.points!], highlighter: toolRef.current === 'highlighter' });
+    if (inkFrame.current === null) inkFrame.current = requestAnimationFrame(() => {
+      inkFrame.current = null;
+      if (gesture.current?.kind === 'draw') setInk({ points: [...gesture.current.points!], highlighter: toolRef.current === 'highlighter' });
+    });
   }
 
   function onPointerUp(event: React.PointerEvent<HTMLDivElement>) {
@@ -369,6 +383,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'ink', x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY), z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { points: points.map((point) => ({ ...point, x: point.x - minX, y: point.y - minY })), color, width, highlighter: toolRef.current === 'highlighter' } };
       updateObjects([...objectsRef.current, object]);
       record(current.objects);
+      if (inkFrame.current !== null) { cancelAnimationFrame(inkFrame.current); inkFrame.current = null; }
       setInk(null);
     } else if (current.kind === 'lasso') {
       const polygon = current.lasso ?? [];
@@ -384,6 +399,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (!current) return;
     if (current.kind === 'pan') updateCamera(current.camera);
     if (['move', 'resize', 'erase'].includes(current.kind)) updateObjects(current.objects);
+    if (inkFrame.current !== null) { cancelAnimationFrame(inkFrame.current); inkFrame.current = null; }
     setInk(null);
     setLasso([]);
     gesture.current = null;
@@ -469,7 +485,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (!current || current.type !== 'text' || textAppearance(current).color || Math.abs(current.height - nextHeight) < 1) return;
     updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, height: nextHeight } : object));
   }
-  function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, clone(objectsRef.current)); }
+  function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, objectsRef.current); }
   function endTextEdit(id: string) { const before = textEditStart.current.get(id); if (before) { record(before); textEditStart.current.delete(id); } }
 
   useEffect(() => {
@@ -553,7 +569,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'extension' || (object.type === 'document' && !fileNeedsTile(object, extensions))) && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && !fileNeedsTile(object, extensions) && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
           {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onHeightChange={(height) => fitPlainText(object.id, height)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
-          {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
+          {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><InkShape payload={object.payload as InkPayload} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} onPreviewFailure={() => previewUnavailable(object.id)} />}
           {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} onPreviewFailure={() => previewUnavailable(object.id)} />}
           {object.type === 'document' && (fileNeedsTile(object, extensions) ? <FileTile name={(object.payload as FilePayload).name} /> : <Suspense fallback={<div className="document-loading">Loading preview…</div>}><DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onPreviewFailure={() => previewUnavailable(object.id)} onError={onError} /></Suspense>)}
@@ -588,6 +604,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   </div>;
 });
 export default Canvas;
+
+type InkPayload = { points: InkPoint[]; width: number; highlighter: boolean; color: string };
+const InkShape = memo(function InkShape({ payload }: { payload: InkPayload }) {
+  return <path d={inkPath(payload.points, payload.width * (payload.highlighter ? 3.5 : 1))} fill={payload.color} opacity={payload.highlighter ? 0.35 : 1} />;
+});
 
 function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} aria-pressed={active === tool} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
 
@@ -662,7 +683,7 @@ function ImageBlock({ assetId, onLoad, onPreviewFailure }: { assetId: string; on
   const [url, setUrl] = useState('');
   useEffect(() => {
     let active = true; let objectUrl = '';
-    window.whiteboard.readAsset(assetId).then((bytes) => { objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); if (active) setUrl(objectUrl); }).catch(() => { if (active) onPreviewFailure(); });
+    window.whiteboard.readAsset(assetId).then((bytes) => { if (!active) return; objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)])); setUrl(objectUrl); }).catch(() => { if (active) onPreviewFailure(); });
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId]);
   return url ? <img className="image-body" src={url} alt="Embedded image" draggable={false} onLoad={(event) => onLoad(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} onError={onPreviewFailure} /> : <div className="image-loading">Loading image…</div>;
@@ -676,8 +697,9 @@ function MediaBlock({ object, asset, onSelect, onMove, onPreviewFailure }: { obj
   useEffect(() => {
     let live = true; let objectUrl = '';
     window.whiteboard.readAsset(assetId).then((bytes) => {
+      if (!live) return;
       objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: asset?.mime_type || mediaMime[format] || '' }));
-      if (live) setUrl(objectUrl);
+      setUrl(objectUrl);
     }).catch(() => { if (live) onPreviewFailure(); });
     return () => { live = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [assetId, asset?.mime_type, format]);

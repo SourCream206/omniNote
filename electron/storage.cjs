@@ -184,16 +184,42 @@ class WorkspaceStore {
   savePage(pageId, objects, camera) {
     if (this.getNode(pageId)?.kind !== 'page') throw new Error('Page not found');
     if (!Array.isArray(objects) || objects.length > 10000) throw new Error('Invalid page objects');
+    const payloads = new Map();
+    let payloadSize = 0;
     for (const object of objects) {
-      if (!object || typeof object.id !== 'string' || !validTypes.has(object.type)) throw new Error('Invalid object');
+      if (!object || typeof object.id !== 'string' || object.id.length > 128 || !validTypes.has(object.type)) throw new Error('Invalid object');
       for (const key of ['x','y','width','height','z_index']) if (!Number.isFinite(object[key])) throw new Error('Invalid object geometry');
-      if (object.width < 0 || object.height < 0 || JSON.stringify(object.payload).length > 2_000_000) throw new Error('Invalid object payload');
+      const payload = JSON.stringify(object.payload);
+      if (object.width < 0 || object.height < 0 || !payload || payload.length > 2_000_000) throw new Error('Invalid object payload');
+      payloadSize += payload.length;
+      if (payloadSize > 128_000_000) throw new Error('Page content exceeds the safety limit');
+      payloads.set(object.id, payload);
     }
     if (!camera || ![camera.x,camera.y,camera.zoom].every(Number.isFinite) || camera.zoom < 0.1 || camera.zoom > 8) throw new Error('Invalid camera');
     this.transaction(() => {
-      this.db.prepare('DELETE FROM objects WHERE page_id=?').run(pageId);
+      const previous = new Map(this.db.prepare('SELECT id,type,x,y,width,height,z_index,group_id,payload_json FROM objects WHERE page_id=?').all(pageId).map((row) => [row.id, row]));
       const insert = this.db.prepare('INSERT INTO objects VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-      for (const object of objects) insert.run(object.id, pageId, object.type, object.x, object.y, object.width, object.height, object.z_index, object.group_id ?? null, 1, JSON.stringify(object.payload));
+      const update = this.db.prepare('UPDATE objects SET type=?,x=?,y=?,width=?,height=?,z_index=?,group_id=?,payload_json=? WHERE id=? AND page_id=?');
+      for (const object of objects) {
+        const payload = payloads.get(object.id);
+        const old = previous.get(object.id);
+        previous.delete(object.id);
+        const groupId = object.group_id ?? null;
+        if (old && old.type === object.type && old.x === object.x && old.y === object.y && old.width === object.width && old.height === object.height && old.z_index === object.z_index && old.group_id === groupId && old.payload_json === payload) continue;
+        if (old) update.run(object.type, object.x, object.y, object.width, object.height, object.z_index, groupId, payload, object.id, pageId);
+        else insert.run(object.id, pageId, object.type, object.x, object.y, object.width, object.height, object.z_index, groupId, 1, payload);
+      }
+      const remove = this.db.prepare('DELETE FROM objects WHERE id=? AND page_id=?');
+      for (const objectId of previous.keys()) remove.run(objectId, pageId);
+      this.db.prepare('UPDATE pages SET camera_x=?, camera_y=?, camera_zoom=? WHERE id=?').run(camera.x, camera.y, camera.zoom, pageId);
+      this.db.prepare('UPDATE nodes SET updated_at=? WHERE id=?').run(now(), pageId);
+    });
+  }
+
+  saveCamera(pageId, camera) {
+    if (this.getNode(pageId)?.kind !== 'page') throw new Error('Page not found');
+    if (!camera || ![camera.x,camera.y,camera.zoom].every(Number.isFinite) || camera.zoom < 0.1 || camera.zoom > 8) throw new Error('Invalid camera');
+    this.transaction(() => {
       this.db.prepare('UPDATE pages SET camera_x=?, camera_y=?, camera_zoom=? WHERE id=?').run(camera.x, camera.y, camera.zoom, pageId);
       this.db.prepare('UPDATE nodes SET updated_at=? WHERE id=?').run(now(), pageId);
     });

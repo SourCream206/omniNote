@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   deleteNode: (nodeId) => invoke('node:delete', nodeId),
   moveNode: (nodeId, parentId, beforeId) => invoke('node:move', nodeId, parentId, beforeId),
   savePage: (pageId, objects, camera) => invoke('page:save', pageId, objects, camera),
+  saveCamera: (pageId, camera) => invoke('page:save-camera', pageId, camera),
   savePageSync: (pageId, objects, camera) => {
     const result = ipcRenderer.sendSync('page:save-sync', pageId, objects, camera);
     if (result?.error) throw new Error(result.error);
