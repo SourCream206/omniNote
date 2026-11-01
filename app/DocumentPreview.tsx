@@ -12,6 +12,19 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
+export async function pdfPrintoutHeight(assetId: string, width: number) {
+  const loading = pdfjs.getDocument({ data: new Uint8Array(await window.whiteboard.readAsset(assetId)) });
+  try {
+    const pdf = await loading.promise;
+    let height = 16;
+    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 50); pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const size = page.getViewport({ scale: 1 });
+      height += (width - 24) * size.height / size.width + 8;
+    }
+    return height;
+  } finally { await loading.destroy(); }
+}
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const frameCsp = "default-src 'none'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; script-src 'none'; connect-src 'none'; base-uri 'none'";
 const htmlDocument = (body: string, styles = '') => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${frameCsp}"><style>html,body{margin:0;padding:8px;font:13px/1.45 system-ui,sans-serif;color:#253454;background:white}a{color:#285fc0;text-decoration:underline}table{border-collapse:collapse}td,th{border:1px solid #dce3ee;padding:3px 6px}img{max-width:100%}</style>${styles}</head><body>${body}</body></html>`;
@@ -150,7 +163,6 @@ async function renderPptx(bytes: Uint8Array) {
     const relations = new Map<string, string>();
     relXml?.querySelectorAll('Relationship').forEach((element) => relations.set(element.getAttribute('Id') || '', element.getAttribute('Target') || ''));
     const blocks: string[] = [];
-    xml.getElementsByTagName('p:sp').length;
     for (const shape of Array.from(xml.getElementsByTagName('p:sp'))) {
       const runs: string[] = [];
       for (const run of Array.from(shape.getElementsByTagName('a:r'))) {

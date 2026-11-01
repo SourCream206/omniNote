@@ -1,7 +1,6 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, lazy, Suspense, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { EditorContent, useEditor } from '@tiptap/react';
-import { pdfjs } from 'react-pdf';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -11,9 +10,11 @@ import { FontSize, TextStyle } from '@tiptap/extension-text-style';
 import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Scissors, ClipboardPaste, Files, Trash2, Minus, Plus, Maximize2, ChevronDown, Type, StickyNote, Move, File } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
-import DocumentPreview from './DocumentPreview';
 import ExtensionFrame from './ExtensionFrame';
 import FullscreenControl, { type FullscreenScope } from './FullscreenControl';
+import { documentViewer, previewFormats } from './documentViewers';
+
+const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
 export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
@@ -26,12 +27,8 @@ const clamp = (number: number, min: number, max: number) => Math.max(min, Math.m
 type TextAppearance = { color: string | null; opacity: number };
 const textAppearance = (object: CanvasObject): TextAppearance => (object.payload as { appearance?: TextAppearance }).appearance ?? { color: null, opacity: 100 };
 const paperColor = (appearance: TextAppearance) => appearance.color ? `${appearance.color}${Math.round(clamp(appearance.opacity, 0, 100) * 255 / 100).toString(16).padStart(2, '0')}` : 'transparent';
-const previewFormats = new Set(['pdf', 'docx', 'xlsx', 'pptx', 'txt', 'md', 'markdown', 'html', 'htm']);
 const fileTileSize = { width: 112, height: 106 };
 type FilePayload = { format: string; name: string; assetId: string; previewFailed?: boolean; fileTileCompact?: boolean; previewSize?: { width: number; height: number } };
-function documentViewer(format: string, extensions: ExtensionInfo[]) {
-  return extensions.filter((item) => item.enabled && item.grantedPermissions.includes('asset.read')).flatMap((extension) => (extension.manifest.contributes.documentViewers ?? []).filter((entry) => entry.extensions.includes(format)).map((entry) => ({ extension, entry: entry.entry })))[0];
-}
 function fileNeedsTile(object: CanvasObject, extensions: ExtensionInfo[]) {
   if (object.type !== 'document') return false;
   const payload = object.payload as FilePayload;
@@ -56,17 +53,7 @@ function plainTextOf(node: unknown): string {
   return value.type === 'paragraph' || value.type === 'heading' ? `${content}\n` : content;
 }
 async function pdfPrintoutHeight(assetId: string, width: number) {
-  const loading = pdfjs.getDocument({ data: new Uint8Array(await window.whiteboard.readAsset(assetId)) });
-  try {
-    const pdf = await loading.promise;
-    let height = 16;
-    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 50); pageNumber++) {
-      const page = await pdf.getPage(pageNumber);
-      const size = page.getViewport({ scale: 1 });
-      height += (width - 24) * size.height / size.width + 8;
-    }
-    return height;
-  } finally { await loading.destroy(); }
+  return (await import('./DocumentPreview')).pdfPrintoutHeight(assetId, width);
 }
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
@@ -569,7 +556,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><path d={inkPath((object.payload as { points: InkPoint[] }).points, (object.payload as { width: number }).width * ((object.payload as { highlighter: boolean }).highlighter ? 3.5 : 1))} fill={(object.payload as { color: string }).color} opacity={(object.payload as { highlighter: boolean }).highlighter ? 0.35 : 1} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} onPreviewFailure={() => previewUnavailable(object.id)} />}
           {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} onPreviewFailure={() => previewUnavailable(object.id)} />}
-          {object.type === 'document' && (fileNeedsTile(object, extensions) ? <FileTile name={(object.payload as FilePayload).name} /> : <DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onPreviewFailure={() => previewUnavailable(object.id)} onError={onError} />)}
+          {object.type === 'document' && (fileNeedsTile(object, extensions) ? <FileTile name={(object.payload as FilePayload).name} /> : <Suspense fallback={<div className="document-loading">Loading preview…</div>}><DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onPreviewFailure={() => previewUnavailable(object.id)} onError={onError} /></Suspense>)}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onError={onError} />}
           {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
         </div>)}

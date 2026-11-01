@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronRight, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Minimize2, Copy, PanelRight } from 'lucide-react';
 import folderIcon from './assets/material-icons/folder-base.svg';
 import documentIcon from './assets/material-icons/document.svg';
@@ -34,14 +34,6 @@ function treeDropFor(nodes: TreeNode[], sourceId: string, targetId: string, poin
 }
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
 const paperChoices: { style: PaperStyle; label: string }[] = [{ style: 'blank', label: 'Blank' }, { style: 'dots', label: 'Dots' }, { style: 'grid', label: 'Grid' }, { style: 'lines', label: 'Lines' }];
-function pageIcon(pageId: string, snapshot: Snapshot) {
-  const assetId = snapshot.documentPages.find((item) => item.page_id === pageId)?.asset_id;
-  const asset = snapshot.assets.find((item) => item.id === assetId);
-  if (!asset) return null;
-  const name = asset.original_name.toLowerCase();
-  return name.endsWith('.pdf') ? pdfIcon : /\.docx?$/.test(name) ? wordIcon : /\.(mp3|m4a|wav|ogg|flac)$/.test(name) ? audioIcon : /\.(mp4|webm|mov|mkv)$/.test(name) ? videoIcon : documentIcon;
-}
-
 export default function App() {
   const [dialogRequest, setDialogRequest] = useState<{ title: string; message?: string; mode: 'text' | 'confirm'; action: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
@@ -245,6 +237,25 @@ export default function App() {
 
 
   const nodes = snapshot?.nodes ?? [];
+  const childrenByParent = useMemo(() => {
+    const groups = new Map<string | null, TreeNode[]>();
+    for (const node of nodes) {
+      const children = groups.get(node.parent_id) ?? [];
+      children.push(node);
+      groups.set(node.parent_id, children);
+    }
+    for (const children of groups.values()) children.sort((a, b) => a.order_index - b.order_index);
+    return groups;
+  }, [nodes]);
+  const documentIcons = useMemo(() => {
+    const icons = new Map<string, string>();
+    const assets = new Map(snapshot?.assets.map((asset) => [asset.id, asset.original_name.toLowerCase()]) ?? []);
+    for (const item of snapshot?.documentPages ?? []) {
+      const name = assets.get(item.asset_id) ?? '';
+      icons.set(item.page_id, name.endsWith('.pdf') ? pdfIcon : /\.docx?$/.test(name) ? wordIcon : /\.(mp3|m4a|wav|ogg|flac)$/.test(name) ? audioIcon : /\.(mp4|webm|mov|mkv)$/.test(name) ? videoIcon : documentIcon);
+    }
+    return icons;
+  }, [snapshot?.assets, snapshot?.documentPages]);
   const activePageId = activePane === 1 && splitPageId ? splitPageId : pageId;
   const page = nodes.find((node) => node.id === activePageId && node.kind === 'page') ?? null;
   const section = nodes.find((node) => node.id === sectionId && node.kind !== 'page') ?? null;
@@ -506,7 +517,7 @@ export default function App() {
           onPointerCancel={() => { tabPointer.current = null; setTabDrop(null); setTabGhost(null); }}
           onClick={() => { if (suppressTabClick.current) return; pane === 0 ? setPageId(tab.id) : setSplitPageId(tab.id); setActivePane(pane); setSectionId(tab.parent_id); }}
           onDoubleClick={(event) => { if (!(event.target as HTMLElement).closest('button')) void renameNode(tab); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}>
-          {pageIcon(tab.id, snapshot) ? <img className="material-file-icon" src={pageIcon(tab.id, snapshot)!} alt="" /> : <FileText size={14} />}<span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id, pane); }}><X size={13} /></button>
+          {documentIcons.has(tab.id) ? <img className="material-file-icon" src={documentIcons.get(tab.id)} alt="" /> : <FileText size={14} />}<span>{tab.title}</span><button title={`Close ${tab.title}`} aria-label={`Close ${tab.title}`} onClick={(event) => { event.stopPropagation(); closeTab(tab.id, pane); }}><X size={13} /></button>
         </div>;
       })}
       {tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split && <span className="tab-drop-end" aria-hidden="true" />}
@@ -523,7 +534,7 @@ export default function App() {
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && sectionId) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length && sectionId) { event.preventDefault(); void importFilesToSection(Array.from(event.dataTransfer.files), sectionId); } }}>
-          {childrenOf(nodes, null).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} nodes={nodes} documentIcons={new Map(snapshot.documentPages.map((item) => [item.page_id, pageIcon(item.page_id, snapshot) ?? documentIcon]))} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'page') openPage(selected.id, selected.parent_id); else { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} />)}
+          {(childrenByParent.get(null) ?? []).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} childrenByParent={childrenByParent} documentIcons={documentIcons} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'page') openPage(selected.id, selected.parent_id); else { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -598,10 +609,10 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates, dir
   </div>;
 }
 
-interface TreeProps { node: TreeNode; nodes: TreeNode[]; documentIcons: Map<string, string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; treeDrop: TreeDrop | null; dragSourceId: string | null; suppressTreeClick: { current: boolean }; onTreePointerDown(id: string, event: React.PointerEvent<HTMLDivElement>): void; onTreePointerCancel(): void; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void }
+interface TreeProps { node: TreeNode; childrenByParent: Map<string | null, TreeNode[]>; documentIcons: Map<string, string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; treeDrop: TreeDrop | null; dragSourceId: string | null; suppressTreeClick: { current: boolean }; onTreePointerDown(id: string, event: React.PointerEvent<HTMLDivElement>): void; onTreePointerCancel(): void; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void }
 function TreeItem(props: TreeProps) {
-  const { node, nodes, documentIcons, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, treeDrop, dragSourceId, suppressTreeClick, onTreePointerDown, onTreePointerCancel, onToggle, onSelect, onCreate, onRename, onDelete, onImportFiles, onPickDocuments } = props;
-  const children = childrenOf(nodes, node.id);
+  const { node, childrenByParent, documentIcons, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, treeDrop, dragSourceId, suppressTreeClick, onTreePointerDown, onTreePointerCancel, onToggle, onSelect, onCreate, onRename, onDelete, onImportFiles, onPickDocuments } = props;
+  const children = childrenByParent.get(node.id) ?? [];
   const expandable = node.kind !== 'page';
   const menu = openMenuId === node.id;
   const [fileDrop, setFileDrop] = useState(false);
