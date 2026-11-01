@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f6">
+  <meta name="description" content="Download omniNote, a local-first desktop workspace for notes, documents, and ink.">
+  <title>omniNote — Download</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #202b37; background: #f7f8f6; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; }
+    a { color: inherit; }
+    .shell { width: min(100% - 48px, 900px); margin: 0 auto; }
+    header { height: 76px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #dde3df; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-size: 16px; font-weight: 700; letter-spacing: -.025em; }
+    .brand svg { color: #356650; }
+    .header-link, .minor-link { color: #526159; font-size: 13px; text-decoration: none; }
+    .header-link:hover, .minor-link:hover { color: #24543c; text-decoration: underline; }
+    main { padding: clamp(64px, 12vw, 116px) 0 92px; }
+    .eyebrow { margin: 0 0 19px; color: #356650; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+    h1 { max-width: 760px; margin: 0; font-size: clamp(42px, 7vw, 76px); line-height: 1.06; font-weight: 700; letter-spacing: -.055em; }
+    .intro { max-width: 570px; margin: 25px 0 31px; color: #59665f; font-size: clamp(16px, 2.2vw, 18px); line-height: 1.6; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 15px 23px; }
+    .download { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 19px; border-radius: 7px; background: #315f47; color: white; font-size: 14px; font-weight: 650; text-decoration: none; transition: background 150ms ease, transform 150ms ease; }
+    .download:hover { background: #244d38; transform: translateY(-1px); }
+    .download:focus-visible, a:focus-visible { outline: 3px solid #96bf9e; outline-offset: 3px; }
+    .download svg { width: 17px; height: 17px; }
+    .version { margin: 14px 0 0; color: #718078; font-size: 12px; }
+    .details { display: grid; grid-template-columns: repeat(3, 1fr); gap: 27px; margin-top: clamp(86px, 13vw, 128px); padding-top: 25px; border-top: 1px solid #dde3df; }
+    .details h2 { margin: 0 0 8px; font-size: 14px; font-weight: 700; }
+    .details p { margin: 0; color: #657168; font-size: 13px; line-height: 1.6; }
+    footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding: 23px 0 30px; border-top: 1px solid #dde3df; color: #748077; font-size: 12px; }
+    footer nav { display: flex; gap: 23px; }
+    @media (max-width: 650px) { .shell { width: min(100% - 36px, 900px); } .details { grid-template-columns: 1fr; gap: 23px; } main { padding-bottom: 68px; } }
+    @media (prefers-reduced-motion: reduce) { .download { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <a class="brand" href="./" aria-label="omniNote home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4.5h6.2c1.1 0 2.1.35 2.8 1.1.7-.75 1.7-1.1 2.8-1.1H20v15h-4.2c-1.1 0-2.1.35-2.8 1.1-.7-.75-1.7-1.1-2.8-1.1H4v-15Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 5.6v14" stroke="currentColor" stroke-width="1.7"/></svg>omniNote</a>
+      <a class="header-link" href="https://github.com/SourCream206/omniNote">View on GitHub ↗</a>
+    </header>
+    <main>
+      <p class="eyebrow">Local-first notes for Windows</p>
+      <h1>Room for every note.</h1>
+      <p class="intro">Write, draw, and keep your documents together on an infinite canvas. Your notebooks live on your computer, ready whenever you are.</p>
+      <div class="actions">
+        <a id="download-link" class="download" href="https://github.com/SourCream206/omniNote/releases/download/v__VERSION__/omniNote-Setup-__VERSION__.exe"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 18v3h16v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Download for Windows</a>
+        <a class="minor-link" href="https://github.com/SourCream206/omniNote/releases/latest">Release notes ↗</a>
+      </div>
+      <p class="version" id="version-label">Windows installer · v__VERSION__</p>
+      <section class="details" aria-label="What omniNote includes">
+        <div><h2>Make space</h2><p>Organize notebooks and folders, then open pages and documents side by side.</p></div>
+        <div><h2>Write naturally</h2><p>Use text, sticky notes, and pressure-aware ink on blank, lined, or grid paper.</p></div>
+        <div><h2>Keep it yours</h2><p>Work locally without an account. Export a backup when you need one.</p></div>
+      </section>
+    </main>
+    <footer><span>omniNote is in active development.</span><nav aria-label="Footer"><a class="minor-link" href="catalog.json">Extension catalog</a><a class="minor-link" href="https://github.com/SourCream206/omniNote/issues">Report an issue</a></nav></footer>
+  </div>
+  <script>
+    fetch('https://api.github.com/repos/SourCream206/omniNote/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+      .then((response) => { if (!response.ok) throw new Error('Release lookup failed'); return response.json(); })
+      .then((release) => {
+        const installer = release.assets?.find((asset) => /^omniNote-Setup-\d+\.\d+\.\d+\.exe$/.test(asset.name));
+        if (!installer || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return;
+        document.getElementById('download-link').href = installer.browser_download_url;
+        document.getElementById('version-label').textContent = `Windows installer · ${release.tag_name}`;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>
