@@ -1,6 +1,7 @@
 export type NodeKind = 'notebook' | 'folder' | 'section' | 'page';
+export type FolderIcon = 'default' | 'docs' | 'download';
 export type CanvasTool = 'select' | 'text' | 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'hand';
-export interface TreeNode { id: string; parent_id: string | null; kind: NodeKind; title: string; order_index: number; created_at: string; updated_at: string }
+export interface TreeNode { id: string; parent_id: string | null; kind: NodeKind; title: string; order_index: number; created_at: string; updated_at: string; folder_icon: FolderIcon; folder_color: string }
 export type PaperStyle = 'blank' | 'dots' | 'grid' | 'lines';
 export interface PageRow { id: string; camera_x: number; camera_y: number; camera_zoom: number; paper_style: PaperStyle }
 export interface Asset { id: string; relative_path: string; original_name: string; mime_type: string; sha256: string; size: number; updated_at: string }
@@ -39,6 +40,7 @@ export interface WhiteboardBridge {
   createNode(parentId: string | null, kind: NodeKind, title: string): Promise<string>;
   createDocumentPage(sectionId: string, assetId: string): Promise<string>;
   renameNode(nodeId: string, title: string): Promise<void>;
+  setFolderAppearance(nodeId: string, icon: FolderIcon, color: string): Promise<void>;
   deleteNode(nodeId: string): Promise<void>;
   moveNode(nodeId: string, parentId: string | null, beforeId?: string | null): Promise<void>;
   savePage(pageId: string, objects: CanvasObject[], camera: Camera): Promise<void>;

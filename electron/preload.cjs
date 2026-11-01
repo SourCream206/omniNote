@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('whiteboard', Object.freeze({
   createNode: (parentId, kind, title) => invoke('node:create', parentId, kind, title),
   createDocumentPage: (sectionId, assetId) => invoke('document-page:create', sectionId, assetId),
   renameNode: (nodeId, title) => invoke('node:rename', nodeId, title),
+  setFolderAppearance: (nodeId, icon, color) => invoke('node:appearance', nodeId, icon, color),
   deleteNode: (nodeId) => invoke('node:delete', nodeId),
   moveNode: (nodeId, parentId, beforeId) => invoke('node:move', nodeId, parentId, beforeId),
   savePage: (pageId, objects, camera) => invoke('page:save', pageId, objects, camera),

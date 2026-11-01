@@ -330,6 +330,21 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .marketplace-entry button { display:flex; align-items:center; gap:3px; flex:0 0 auto; padding:5px 6px; border:1px solid var(--ui-line); border-radius:5px; background:var(--ui-surface); color:var(--ui-accent); font-size:10px; }
 .marketplace-entry button:hover:not(:disabled) { background:var(--ui-hover); }
 .tree-item:focus-within .tree-more { display:flex; }
+.tree-children { display:grid; grid-template-rows:0fr; opacity:0; visibility:hidden; transition:grid-template-rows 150ms ease,opacity 150ms ease,visibility 150ms; }
+.tree-children.open { grid-template-rows:1fr; opacity:1; visibility:visible; }
+.tree-children-inner { min-height:0; overflow:hidden; }
+.tree-children.open>.tree-children-inner { overflow:visible; }
+.folder-symbol { flex:0 0 auto; transition:transform 150ms ease; }
+.tree-item[aria-expanded=true] .folder-symbol { transform:translateY(-1px); }
+.tree-menu { width:170px; }
+.tree-menu button[aria-expanded] { display:flex; align-items:center; justify-content:space-between; }
+.folder-appearance { padding:6px 5px 8px; border-top:1px solid var(--ui-line); border-bottom:1px solid var(--ui-line); }
+.folder-icon-choices { display:flex; gap:4px; }
+.tree-menu .folder-icon-choices button { display:grid; place-items:center; width:36px; height:30px; padding:3px; border:1px solid transparent; }
+.tree-menu .folder-icon-choices button.selected { border-color:var(--ui-accent); background:var(--ui-selected); }
+.folder-appearance label { display:flex; align-items:center; justify-content:space-between; padding:5px 3px 0; color:var(--ui-muted); font-size:11px; }
+.folder-appearance input[type=color] { width:31px; height:22px; padding:0; border:0; background:transparent; cursor:pointer; }
+@media (prefers-reduced-motion:reduce) { .tree-children,.folder-symbol { transition:none; } }
 @media (pointer:coarse) { .tree-item .tree-more { display:flex; } }
 @media (pointer:coarse) { .activity-rail .settings-trigger { margin-top:auto; } .theme-option { min-height:48px; } }
 @media print { :root[data-theme=midnight] { color-scheme:light; } body, .app-shell, .editor-area, .canvas-shell, .canvas-viewport { background:#fff !important; color:#263244 !important; } }

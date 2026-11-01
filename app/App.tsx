@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronRight, Layers3, MoreHorizontal, Plus, Upload, X, Download, FileText, Puzzle, Grid2X2, Check, Search, Settings2, Minus, Maximize2, Minimize2, Copy, PanelRight } from 'lucide-react';
-import folderIcon from './assets/material-icons/folder-base.svg';
 import documentIcon from './assets/material-icons/document.svg';
 import pdfIcon from './assets/material-icons/pdf.svg';
 import wordIcon from './assets/material-icons/word.svg';
 import audioIcon from './assets/material-icons/audio.svg';
 import videoIcon from './assets/material-icons/video.svg';
-import type { Asset, CanvasObject, CanvasTool, Camera, ExtensionInfo, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
+import type { Asset, CanvasObject, CanvasTool, Camera, ExtensionInfo, FolderIcon, MarketplaceEntry, MarketplaceSearch, NodeKind, PaperStyle, Snapshot, TreeNode, UpdateStatus } from './types';
 import Canvas, { type CanvasHandle } from './Canvas';
 import MarketplacePanel from './MarketplacePanel';
 import DocumentPage from './DocumentPage';
@@ -304,7 +303,7 @@ export default function App() {
   }
 
   async function createNode(kind: NodeKind, parentId: string | null) {
-    const defaults: Record<NodeKind, string> = { notebook: 'New notebook NB', folder: 'New folder', section: 'New folder', page: 'Untitled page' };
+    const defaults: Record<NodeKind, string> = { notebook: 'New notebook', folder: 'New folder', section: 'New folder', page: 'Untitled page' };
     const title = await ask(`Create ${kind === 'section' ? 'folder' : kind}`, defaults[kind], 'Create');
     if (title === null) return;
     try {
@@ -322,6 +321,11 @@ export default function App() {
     const title = await ask(`Rename ${node.kind === 'section' ? 'folder' : node.kind}`, node.title, 'Rename');
     if (title === null || title === node.title) return;
     try { await window.whiteboard.renameNode(node.id, title); await refresh(); }
+    catch (error) { notifyError(error); }
+  }
+
+  async function setFolderAppearance(node: TreeNode, icon: FolderIcon, color: string) {
+    try { await window.whiteboard.setFolderAppearance(node.id, icon, color); await refresh(); }
     catch (error) { notifyError(error); }
   }
 
@@ -386,7 +390,7 @@ export default function App() {
     const parentId = nodes.find((node) => node.id === activeId)?.parent_id ?? sectionId;
     const parent = nodes.find((node) => node.id === parentId && node.kind !== 'page');
     const notebookId = nodes.find((node) => node.kind === 'notebook')?.id;
-    const destination = parent?.id ?? notebookId ?? await window.whiteboard.createNode(null, 'notebook', 'My Notebook NB');
+    const destination = parent?.id ?? notebookId ?? await window.whiteboard.createNode(null, 'notebook', 'My Notebook');
     await importFilesToSection(files, destination, pane);
   }
 
@@ -570,7 +574,7 @@ export default function App() {
         {activePanel === 'explorer' ? <>
         <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks" onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && sectionId) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length && sectionId) { event.preventDefault(); void importFilesToSection(Array.from(event.dataTransfer.files), sectionId); } }}>
-          {(childrenByParent.get(null) ?? []).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} childrenByParent={childrenByParent} documentIcons={documentIcons} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'page') openPage(selected.id, selected.parent_id); else { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} onReveal={(selected) => window.whiteboard.revealNode(selected.id).catch(notifyError)} />)}
+          {(childrenByParent.get(null) ?? []).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} childrenByParent={childrenByParent} documentIcons={documentIcons} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'page') openPage(selected.id, selected.parent_id); else { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} onReveal={(selected) => window.whiteboard.revealNode(selected.id).catch(notifyError)} onAppearance={setFolderAppearance} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
@@ -644,12 +648,24 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates, dir
   </div>;
 }
 
-interface TreeProps { node: TreeNode; childrenByParent: Map<string | null, TreeNode[]>; documentIcons: Map<string, string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; treeDrop: TreeDrop | null; dragSourceId: string | null; suppressTreeClick: { current: boolean }; onTreePointerDown(id: string, event: React.PointerEvent<HTMLDivElement>): void; onTreePointerCancel(): void; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void; onReveal(node: TreeNode): void }
+interface TreeProps { node: TreeNode; childrenByParent: Map<string | null, TreeNode[]>; documentIcons: Map<string, string>; depth: number; expanded: Set<string>; openMenuId: string | null; onOpenMenu(id: string | null): void; selectedSectionId: string | null; selectedPageId: string | null; treeDrop: TreeDrop | null; dragSourceId: string | null; suppressTreeClick: { current: boolean }; onTreePointerDown(id: string, event: React.PointerEvent<HTMLDivElement>): void; onTreePointerCancel(): void; onToggle(id: string): void; onSelect(node: TreeNode): void; onCreate(kind: NodeKind, parentId: string | null): void; onRename(node: TreeNode): void; onDelete(node: TreeNode): void; onImportFiles(files: File[], sectionId: string): void; onPickDocuments(sectionId: string): void; onReveal(node: TreeNode): void; onAppearance(node: TreeNode, icon: FolderIcon, color: string): void }
+function FolderSymbol({ icon, color, open }: { icon: FolderIcon; color: string; open: boolean }) {
+  return <svg className="folder-symbol" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" style={{ color }}>
+    <path fill="currentColor" opacity=".78" d="M2 4.5A1.5 1.5 0 0 1 3.5 3h4l1.5 2H17a1 1 0 0 1 1 1v1H3a1 1 0 0 0-1 1z" />
+    {open ? <path fill="currentColor" d="M3 8h14.7a1 1 0 0 1 .97 1.24l-1.55 6.2A2 2 0 0 1 15.18 17H3.3a1.5 1.5 0 0 1-1.46-1.84l1.15-5.57A2 2 0 0 1 4.95 8z" /> : <path fill="currentColor" d="M2 8a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v7.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 15.5z" />}
+    {icon === 'docs' && <g fill="none" stroke="#fff" strokeWidth="1.1" strokeLinecap="round"><path d="M7 9.4h5.6v5H7z" /><path d="M8 11h3.5M8 12.5h3.5" /></g>}
+    {icon === 'download' && <g fill="none" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M10 9.5v4.2m-2-2 2 2 2-2M7.2 15h5.6" /></g>}
+  </svg>;
+}
 function TreeItem(props: TreeProps) {
-  const { node, childrenByParent, documentIcons, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, treeDrop, dragSourceId, suppressTreeClick, onTreePointerDown, onTreePointerCancel, onToggle, onSelect, onCreate, onRename, onDelete, onImportFiles, onPickDocuments, onReveal } = props;
+  const { node, childrenByParent, documentIcons, depth, expanded, openMenuId, onOpenMenu, selectedSectionId, selectedPageId, treeDrop, dragSourceId, suppressTreeClick, onTreePointerDown, onTreePointerCancel, onToggle, onSelect, onCreate, onRename, onDelete, onImportFiles, onPickDocuments, onReveal, onAppearance } = props;
   const children = childrenByParent.get(node.id) ?? [];
   const expandable = node.kind !== 'page';
   const menu = openMenuId === node.id;
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [renderChildren, setRenderChildren] = useState(expanded.has(node.id));
+  useEffect(() => { if (expanded.has(node.id)) { setRenderChildren(true); return; } const timer = window.setTimeout(() => setRenderChildren(false), 150); return () => window.clearTimeout(timer); }, [expanded, node.id]);
+  useEffect(() => { if (!menu) setAppearanceOpen(false); }, [menu]);
   const [fileDrop, setFileDrop] = useState(false);
   const dropSection = node.kind === 'page' ? node.parent_id : node.id;
   const activate = () => onSelect(node);
@@ -661,11 +677,11 @@ function TreeItem(props: TreeProps) {
   return <>
     <div className={`tree-item ${selectedPageId === node.id ? 'active' : ''} ${selectedSectionId === node.id ? 'parent-active' : ''} ${treeDrop?.id === node.id ? `drop-${treeDrop.placement}` : fileDrop ? 'drop-inside' : ''} ${dragSourceId === node.id ? 'drag-source' : ''}`} data-node-id={node.id} style={{ paddingLeft: 8 + depth * 17, '--drop-indent': `${8 + depth * 17}px` } as React.CSSProperties} role="treeitem" tabIndex={0} aria-level={depth + 1} aria-selected={selectedPageId === node.id} aria-expanded={expandable ? expanded.has(node.id) : undefined} onPointerDown={(event) => { if (event.button === 0 && !(event.target as HTMLElement).closest('button,.tree-menu')) onTreePointerDown(node.id, event); }} onPointerCancel={onTreePointerCancel} onDragOver={(event) => { if (!event.dataTransfer.types.includes('Files') || !dropSection) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setFileDrop(true); }} onDragLeave={() => setFileDrop(false)} onDrop={onDrop} onClick={() => { if (!suppressTreeClick.current) activate(); }} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!(event.target as HTMLElement).closest('.tree-menu')) onOpenMenu(node.id); }} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(); } }} onDoubleClick={(event) => { event.stopPropagation(); if (!(event.target as HTMLElement).closest('button,.tree-menu')) void onRename(node); }}>
       {expandable ? <button className="tree-chevron" aria-label={`${expanded.has(node.id) ? 'Collapse' : 'Expand'} ${node.title}`} onClick={(event) => { event.stopPropagation(); onToggle(node.id); }}>{expanded.has(node.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button> : <span className="tree-chevron" />}
-      <span className={`tree-symbol ${node.kind}`}>{node.kind === 'notebook' ? <BookOpen size={15} /> : node.kind === 'folder' || node.kind === 'section' ? <img className="material-file-icon" src={folderIcon} alt="" /> : documentIcons.has(node.id) ? <img className="material-file-icon" src={documentIcons.get(node.id)} alt="" /> : <FileText size={15} />}</span>
+      <span className={`tree-symbol ${node.kind}`}>{expandable ? <FolderSymbol icon={node.folder_icon ?? 'default'} color={node.folder_color ?? '#89929e'} open={expanded.has(node.id)} /> : documentIcons.has(node.id) ? <img className="material-file-icon" src={documentIcons.get(node.id)} alt="" /> : <FileText size={15} />}</span>
       <span className="tree-name" title={node.title}>{node.title}</span>
       <button className="tree-more" title={`${node.kind} actions`} aria-label={`${node.kind} actions for ${node.title}`} aria-haspopup="menu" aria-expanded={menu} onClick={(event) => { event.stopPropagation(); onOpenMenu(menu ? null : node.id); }}><MoreHorizontal size={15} /></button>
-      {menu && <div className="tree-menu" role="menu" onClick={(event) => event.stopPropagation()}>{node.kind !== 'page' && <><button role="menuitem" onClick={() => { onCreate('folder', node.id); onOpenMenu(null); }}>New folder</button><button role="menuitem" onClick={() => { onCreate('page', node.id); onOpenMenu(null); }}>New page</button></>}{dropSection && <button role="menuitem" onClick={() => { onPickDocuments(dropSection); onOpenMenu(null); }}>Import documents…</button>}<button role="menuitem" onClick={() => { onReveal(node); onOpenMenu(null); }}>{documentIcons.has(node.id) ? 'Show in File Explorer' : 'Open workspace folder'}</button><button role="menuitem" onClick={() => { onRename(node); onOpenMenu(null); }}>Rename</button><button role="menuitem" className="danger" onClick={() => { onDelete(node); onOpenMenu(null); }}>Delete</button></div>}
+      {menu && <div className="tree-menu" role="menu" onClick={(event) => event.stopPropagation()}>{expandable && <><button role="menuitem" onClick={() => { onCreate('folder', node.id); onOpenMenu(null); }}>New folder</button><button role="menuitem" onClick={() => { onCreate('page', node.id); onOpenMenu(null); }}>New page</button><button role="menuitem" onClick={() => { onPickDocuments(node.id); onOpenMenu(null); }}>Import documents…</button><button role="menuitem" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((before) => !before)}>Folder appearance <ChevronRight size={12} /></button>{appearanceOpen && <div className="folder-appearance" role="group" aria-label="Folder appearance"><div className="folder-icon-choices">{(['default', 'docs', 'download'] as FolderIcon[]).map((icon) => <button key={icon} type="button" className={node.folder_icon === icon ? 'selected' : ''} title={icon === 'default' ? 'Default folder' : icon === 'docs' ? 'Docs folder' : 'Download folder'} aria-label={icon === 'default' ? 'Default folder' : icon === 'docs' ? 'Docs folder' : 'Download folder'} aria-pressed={node.folder_icon === icon} onClick={() => onAppearance(node, icon, node.folder_color ?? '#89929e')}><FolderSymbol icon={icon} color={node.folder_color ?? '#89929e'} open={false} /></button>)}</div><label>Color <input type="color" aria-label="Folder color" value={node.folder_color ?? '#89929e'} onChange={(event) => onAppearance(node, node.folder_icon ?? 'default', event.target.value)} /></label></div>}</> }<button role="menuitem" onClick={() => { onReveal(node); onOpenMenu(null); }}>Open in File Explorer</button><button role="menuitem" onClick={() => { onRename(node); onOpenMenu(null); }}>Rename</button><button role="menuitem" className="danger" onClick={() => { onDelete(node); onOpenMenu(null); }}>Delete</button></div>}
     </div>
-    {expandable && expanded.has(node.id) && <div role="group">{children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</div>}
+    {expandable && renderChildren && <div className={`tree-children ${expanded.has(node.id) ? 'open' : ''}`} role="group" aria-hidden={!expanded.has(node.id)}><div className="tree-children-inner">{children.map((child) => <TreeItem key={child.id} {...props} node={child} depth={depth + 1} />)}</div></div>}
   </>;
 }

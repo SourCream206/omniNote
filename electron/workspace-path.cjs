@@ -11,7 +11,13 @@ function workspaceDirectory(documentsPath, userDataPath, override) {
   const staging = `${destination}-migrating-${crypto.randomUUID()}`;
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(legacy, staging, { recursive: true, errorOnExist: true, force: false });
-  fs.renameSync(staging, destination);
+  for (let attempt = 0; ; attempt++) {
+    try { fs.renameSync(staging, destination); break; }
+    catch (error) {
+      if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(error.code) || attempt >= 4) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * 2 ** attempt);
+    }
+  }
   return destination;
 }
 

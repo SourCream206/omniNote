@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { NodeFiles } = require('./node-files.cjs');
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -26,6 +27,8 @@ class WorkspaceStore {
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;');
     this.migrate();
     this.seed();
+    this.nodeFiles = new NodeFiles(this);
+    this.nodeFiles.sync();
   }
 
   transaction(work) {
@@ -42,7 +45,7 @@ class WorkspaceStore {
 
   migrate() {
     const version = this.db.prepare('PRAGMA user_version').get().user_version;
-    if (version > 3) throw new Error(`Workspace schema ${version} is newer than this app`);
+    if (version > 5) throw new Error(`Workspace schema ${version} is newer than this app`);
     if (version === 0) this.transaction(() => {
       this.db.exec(`
         CREATE TABLE nodes (
@@ -84,12 +87,24 @@ class WorkspaceStore {
       this.db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(3, now());
       this.db.exec('PRAGMA user_version=3');
     });
+    if (version < 4) this.transaction(() => {
+      this.db.exec('CREATE TABLE node_files (node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE, relative_path TEXT NOT NULL UNIQUE)');
+      this.db.prepare("UPDATE nodes SET title=CASE WHEN length(trim(substr(title,1,length(title)-3)))=0 THEN 'My Notebook' ELSE substr(title,1,length(title)-3) END WHERE kind='notebook' AND title LIKE '% NB'").run();
+      this.db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(4, now());
+      this.db.exec('PRAGMA user_version=4');
+    });
+    if (version < 5) this.transaction(() => {
+      this.db.exec("ALTER TABLE nodes ADD COLUMN folder_icon TEXT NOT NULL DEFAULT 'default' CHECK (folder_icon IN ('default','docs','download'))");
+      this.db.exec("ALTER TABLE nodes ADD COLUMN folder_color TEXT NOT NULL DEFAULT '#89929e'");
+      this.db.prepare('INSERT INTO schema_migrations VALUES (?, ?)').run(5, now());
+      this.db.exec('PRAGMA user_version=5');
+    });
   }
 
   seed() {
     if (this.db.prepare('SELECT COUNT(*) AS count FROM nodes').get().count) return;
     this.transaction(() => {
-      const notebook = this.insertNode(null, 'notebook', 'My Notebook NB');
+      const notebook = this.insertNode(null, 'notebook', 'My Notebook');
       const folder = this.insertNode(notebook, 'folder', 'General');
       this.insertNode(folder, 'page', 'Untitled page');
     });
@@ -110,35 +125,53 @@ class WorkspaceStore {
     const nodeId = id();
     const sibling = this.db.prepare('SELECT COALESCE(MAX(order_index), -1) + 1 AS next FROM nodes WHERE parent_id IS ?').get(parentId);
     const timestamp = now();
-    this.db.prepare('INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?)').run(nodeId, parentId, kind, title.trim() || `Untitled ${kind}`, sibling.next, timestamp, timestamp);
+    this.db.prepare('INSERT INTO nodes (id,parent_id,kind,title,order_index,created_at,updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(nodeId, parentId, kind, title.trim() || `Untitled ${kind}`, sibling.next, timestamp, timestamp);
     if (kind === 'page') this.db.prepare('INSERT INTO pages(id) VALUES (?)').run(nodeId);
     return nodeId;
   }
 
   createNode(parentId, kind, title) {
     if (typeof title !== 'string' || title.length > 200) throw new Error('Invalid title');
-    return this.transaction(() => this.insertNode(parentId ?? null, kind, title));
+    const nodeId = this.transaction(() => this.insertNode(parentId ?? null, kind, title));
+    this.nodeFiles.add(nodeId);
+    return nodeId;
   }
 
   createDocumentPage(sectionId, assetId) {
     const asset = this.db.prepare('SELECT * FROM assets WHERE id=?').get(assetId);
     if (!asset) throw new Error('Asset not found');
-    return this.transaction(() => {
+    const pageId = this.transaction(() => {
       const pageId = this.insertNode(sectionId, 'page', asset.original_name);
       this.db.prepare('INSERT INTO document_pages VALUES (?, ?)').run(pageId, assetId);
       return pageId;
     });
+    this.nodeFiles.add(pageId);
+    return pageId;
   }
 
   renameNode(nodeId, title) {
-    if (!this.getNode(nodeId)) throw new Error('Item not found');
+    const node = this.getNode(nodeId);
+    if (!node) throw new Error('Item not found');
     if (typeof title !== 'string' || !title.trim() || title.length > 200) throw new Error('Title must be 1–200 characters');
-    this.db.prepare('UPDATE nodes SET title=?, updated_at=? WHERE id=?').run(title.trim(), now(), nodeId);
+    this.transaction(() => {
+      this.nodeFiles.relocate(nodeId, node.parent_id, title.trim());
+      this.db.prepare('UPDATE nodes SET title=?, updated_at=? WHERE id=?').run(title.trim(), now(), nodeId);
+    });
+    this.nodeFiles.savePage(nodeId);
+  }
+
+  setFolderAppearance(nodeId, icon, color) {
+    const node = this.getNode(nodeId);
+    if (!node || !['notebook', 'folder', 'section'].includes(node.kind)) throw new Error('Folder not found');
+    if (!['default', 'docs', 'download'].includes(icon) || typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('Invalid folder appearance');
+    this.db.prepare('UPDATE nodes SET folder_icon=?, folder_color=?, updated_at=? WHERE id=?').run(icon, color.toLowerCase(), now(), nodeId);
   }
 
   deleteNode(nodeId) {
     if (!this.getNode(nodeId)) throw new Error('Item not found');
-    this.transaction(() => this.db.prepare('DELETE FROM nodes WHERE id=?').run(nodeId));
+    const restore = this.nodeFiles.trash(nodeId);
+    try { this.transaction(() => this.db.prepare('DELETE FROM nodes WHERE id=?').run(nodeId)); }
+    catch (error) { restore(); throw error; }
   }
 
   moveNode(nodeId, parentId, beforeId = null) {
@@ -157,6 +190,7 @@ class WorkspaceStore {
       if (!before || before.parent_id !== parentId) throw new Error('Invalid reorder target');
     }
     this.transaction(() => {
+      this.nodeFiles.relocate(nodeId, parentId, node.title);
       const oldParent = node.parent_id;
       this.db.prepare('UPDATE nodes SET parent_id=?, updated_at=? WHERE id=?').run(parentId, now(), nodeId);
       for (const parent of new Set([oldParent, parentId])) {
@@ -171,7 +205,7 @@ class WorkspaceStore {
 
   load() {
     return {
-      schemaVersion: 3,
+      schemaVersion: 5,
       directory: this.directory,
       nodes: this.db.prepare('SELECT * FROM nodes ORDER BY order_index, created_at').all(),
       pages: this.db.prepare('SELECT * FROM pages').all(),
