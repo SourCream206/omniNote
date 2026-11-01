@@ -31,8 +31,11 @@
     .download:active { background: #55555a; }
     .download:focus-visible, a:focus-visible { outline: 2px solid #1d1d1f; outline-offset: 3px; }
     .download svg { width: 17px; height: 17px; }
+    .linux-links { display: flex; flex-wrap: wrap; gap: 10px 18px; justify-content: flex-end; }
+    .linux-links a { color: #1d1d1f; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+    .linux-links a:hover { color: #55555a; }
     .release-links { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 19px; }
-    @media (max-width: 560px) { .shell { width: min(100% - 36px, 840px); } .download-row { align-items: flex-start; flex-direction: column; gap: 18px; } .download { width: 100%; } .intro { font-size: 16px; } main { padding-bottom: 64px; } }
+    @media (max-width: 560px) { .shell { width: min(100% - 36px, 840px); } .download-row { align-items: flex-start; flex-direction: column; gap: 18px; } .download { width: 100%; } .linux-links { justify-content: flex-start; } .intro { font-size: 16px; } main { padding-bottom: 64px; } }
   </style>
 </head>
 <body>
@@ -50,8 +53,13 @@
           <a id="download-link" class="download" href="https://github.com/SourCream206/omniNote/releases/download/v__VERSION__/omniNote-Setup-__VERSION__.exe"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 18v3h16v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Download for Windows</a>
         </div>
         <div class="download-row" id="linux-row" hidden>
-          <div><h2>Linux AppImage</h2><p id="linux-version">x86_64 · runs on most desktop Linux distributions</p></div>
-          <a id="linux-link" class="download" href="#">Download for Linux</a>
+          <div><h2>Linux</h2><p id="linux-version">Version __VERSION__ · x86_64</p></div>
+          <div class="linux-links">
+            <a id="linux-deb" href="#" hidden aria-label="Download for Ubuntu or Debian">Ubuntu / Debian</a>
+            <a id="linux-rpm" href="#" hidden aria-label="Download for Fedora or openSUSE">Fedora / openSUSE</a>
+            <a id="linux-arch" href="#" hidden aria-label="Download for Arch Linux">Arch</a>
+            <a id="linux-portable" href="#" hidden aria-label="Download portable Linux AppImage">Portable</a>
+          </div>
         </div>
       </section>
       <div class="release-links"><a class="minor-link" href="https://github.com/SourCream206/omniNote/releases/latest">Release notes ↗</a><a class="minor-link" href="https://github.com/SourCream206/omniNote/releases">Previous versions ↗</a></div>
@@ -65,9 +73,20 @@
         if (!installer || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return;
         document.getElementById('download-link').href = installer.browser_download_url;
         document.getElementById('version-label').textContent = `Version ${release.tag_name.slice(1)} · .exe`;
-        const linux = release.assets.find((asset) => /^omniNote-\d+\.\d+\.\d+-linux-x86_64\.AppImage$/.test(asset.name));
-        if (linux) {
-          document.getElementById('linux-link').href = linux.browser_download_url;
+        const linuxAssets = [
+          ['linux-deb', /\.deb$/], ['linux-rpm', /\.rpm$/],
+          ['linux-arch', /\.(?:pacman|pkg\.tar\.zst)$/], ['linux-portable', /\.AppImage$/],
+        ];
+        let hasLinux = false;
+        for (const [id, extension] of linuxAssets) {
+          const asset = release.assets.find((item) => item.name.startsWith(`omniNote-${release.tag_name.slice(1)}-linux-`) && extension.test(item.name));
+          if (!asset) continue;
+          const link = document.getElementById(id);
+          link.href = asset.browser_download_url;
+          link.hidden = false;
+          hasLinux = true;
+        }
+        if (hasLinux) {
           document.getElementById('linux-version').textContent = `Version ${release.tag_name.slice(1)} · x86_64`;
           document.getElementById('linux-row').hidden = false;
         }

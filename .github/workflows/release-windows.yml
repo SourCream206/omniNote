@@ -50,6 +50,10 @@ jobs:
           name: linux-release
           path: |
             release/*.AppImage
+            release/*.deb
+            release/*.rpm
+            release/*.pacman
+            release/*.pkg.tar.zst
             release/latest-linux.yml
           if-no-files-found: error
 
@@ -67,4 +71,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" release/omniNote-Setup-*.exe release/*.AppImage release/latest.yml release/latest-linux.yml release/*.blockmap --generate-notes
+        run: |
+          shopt -s nullglob
+          assets=(release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.pacman release/*.pkg.tar.zst release/*.yml release/*.blockmap)
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --generate-notes
