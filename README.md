@@ -38,7 +38,7 @@ Local extensions live in the workspace's `extensions/` directory. The bundled `w
 
 ## Current limits and testing
 
-Windows and Linux downloads and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The [latest release](https://github.com/SourCream206/omniNote/releases/latest) is built from a version tag and includes update metadata. Linux AppImage downloads begin with the next release.
+Windows and Linux downloads and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The [latest release](https://github.com/SourCream206/omniNote/releases/latest) is built from a version tag and includes update metadata. Linux AppImage downloads begin with v0.0.8.
 
 Full PDF document tabs can scroll through the complete file; canvas PDF previews and annotation printouts display the first 50 pages. XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. DOCX previews reflect the built-in renderer and may differ from Word pagination. Audio/video playback depends on Chromium's codec support; **Open original** uses the default local app. Link support depends on each previewer and should be checked against real documents. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 
