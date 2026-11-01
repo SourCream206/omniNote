@@ -49,6 +49,7 @@ export default function App() {
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const [tabDrop, setTabDrop] = useState<TabDrop | null>(null);
   const [tabGhost, setTabGhost] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [fileDropPane, setFileDropPane] = useState<0 | 1 | null>(null);
   const [treeDrag, setTreeDrag] = useState<{ id: string; target: TreeDrop | null; x: number; y: number } | null>(null);
   const [annotationPages, setAnnotationPages] = useState<Set<string>>(new Set());
   const [pendingAnnotation, setPendingAnnotation] = useState<string | null>(null);
@@ -350,17 +351,43 @@ export default function App() {
     catch (error) { notifyError(error); }
   }
 
-  async function importFilesToSection(files: File[], targetSectionId: string) {
+  async function importFilesToSection(files: File[], targetSectionId: string, pane: 0 | 1 = activePane) {
+    const importedIds: string[] = [];
     try {
-      let lastId: string | null = null;
+      const oversized = files.find((file) => file.size > 100 * 1024 * 1024);
+      if (oversized) throw new Error(`${oversized.name} exceeds the 100 MB file limit`);
       for (const file of files) {
         const asset = await window.whiteboard.importAsset(file.name, file.type, new Uint8Array(await file.arrayBuffer()));
-        lastId = await window.whiteboard.createDocumentPage(targetSectionId, asset.id);
+        importedIds.push(await window.whiteboard.createDocumentPage(targetSectionId, asset.id));
       }
-      await refresh();
-      setExpanded((before) => new Set([...before, targetSectionId]));
-      if (lastId) openPage(lastId, targetSectionId);
     } catch (error) { notifyError(error); }
+    if (!importedIds.length) return;
+    await refresh();
+    setExpanded((before) => new Set([...before, targetSectionId]));
+    const destination = pane === 1 && rightTabs.length ? 1 : 0;
+    if (destination === 1) {
+      setRightTabs((before) => [...before, ...importedIds.filter((id) => !before.includes(id))]);
+      setSplitPageId(importedIds.at(-1)!);
+    } else {
+      setOpenTabs((before) => [...before, ...importedIds.filter((id) => !before.includes(id))]);
+      setPageId(importedIds.at(-1)!);
+    }
+    setActivePane(destination);
+    setSectionId(targetSectionId);
+  }
+
+  function paneAtDrop(event: React.DragEvent): 0 | 1 {
+    const target = (event.target as HTMLElement).closest<HTMLElement>('.editor-pane[data-pane], .page-tabs[data-pane]');
+    return target?.dataset.pane === '1' && rightTabs.length ? 1 : target?.dataset.pane === '0' ? 0 : activePane;
+  }
+
+  async function openDroppedFiles(files: File[], pane: 0 | 1) {
+    const activeId = pane === 1 ? splitPageId : pageId;
+    const parentId = nodes.find((node) => node.id === activeId)?.parent_id ?? sectionId;
+    const parent = nodes.find((node) => node.id === parentId && node.kind !== 'page');
+    const notebookId = nodes.find((node) => node.kind === 'notebook')?.id;
+    const destination = parent?.id ?? notebookId ?? await window.whiteboard.createNode(null, 'notebook', 'My Notebook NB');
+    await importFilesToSection(files, destination, pane);
   }
 
   function pickDocumentsForSection(targetSectionId: string) {
@@ -510,7 +537,7 @@ export default function App() {
     const panePage = nodes.find((node) => node.id === id && node.kind === 'page');
     const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
     const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
-    return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
+    return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${fileDropPane === pane ? 'file-drop-target' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
       {panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onCameraChange={updateCamera} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
     </div>;
   };
@@ -551,7 +578,7 @@ export default function App() {
         </> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
-      <main className="editor-area" style={{ '--split-percent': `${splitRatio}%` } as React.CSSProperties}>
+      <main className="editor-area" style={{ '--split-percent': `${splitRatio}%` } as React.CSSProperties} onDragOverCapture={(event) => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setFileDropPane(paneAtDrop(event)); }} onDragLeave={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX <= bounds.left || event.clientX >= bounds.right || event.clientY <= bounds.top || event.clientY >= bounds.bottom) setFileDropPane(null); }} onDropCapture={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); event.stopPropagation(); setFileDropPane(null); void openDroppedFiles(Array.from(event.dataTransfer.files), paneAtDrop(event)).catch(notifyError); }}>
         <div className={`editor-tabs-row ${rightTabs.length ? 'split' : ''}`}>{renderTabStrip(0)}{rightTabs.length > 0 && renderTabStrip(1)}</div>
         <div className="workspace-toolbar" ref={setToolbarHost} />
         <div className={`editor-panes ${rightTabs.length ? 'split' : ''} ${tabDrop?.split && tabGhost ? 'drag-split-preview' : ''}`}>{renderPane(pageId, 0)}{rightTabs.length > 0 && <><div className="pane-resizer" role="separator" aria-label="Resize editor groups" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(splitRatio)} tabIndex={0} onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const rect = event.currentTarget.parentElement!.getBoundingClientRect(); setSplitRatio(Math.min(80, Math.max(20, (event.clientX - rect.left) / rect.width * 100))); }} onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSplitRatio((value) => Math.max(20, value - 2)); if (event.key === 'ArrowRight') setSplitRatio((value) => Math.min(80, value + 2)); }} />{renderPane(splitPageId, 1)}</>}</div>

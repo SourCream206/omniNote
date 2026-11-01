@@ -424,6 +424,8 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .tab-drop-end { align-self:stretch; width:2px; flex:0 0 2px; margin:5px 0; border-radius:2px; background:var(--ui-accent); }
 .editor-pane.drop-pane { position:relative; }
 .editor-pane.drop-pane::after { content:""; position:absolute; inset:2px; border:2px solid var(--ui-accent); background:color-mix(in srgb,var(--ui-accent) 7%,transparent); pointer-events:none; z-index:30; }
+.editor-pane.file-drop-target { position:relative; }
+.editor-pane.file-drop-target::after { content:"Drop to open as tab"; position:absolute; inset:8px; z-index:80; display:grid; place-items:center; border:2px dashed var(--ui-accent); border-radius:6px; background:color-mix(in srgb,var(--ui-surface) 88%,transparent); color:var(--ui-accent); font-size:14px; font-weight:600; pointer-events:none; }
 .editor-panes.drag-split-preview::after { background:color-mix(in srgb,var(--ui-accent) 8%,transparent); border-width:2px; }
 .drag-ghost { position:fixed; z-index:90; pointer-events:none; display:flex; align-items:center; gap:7px; max-width:210px; padding:6px 10px; border:1px solid var(--ui-accent); border-radius:5px; background:var(--ui-surface); color:var(--ui-text); box-shadow:0 6px 18px var(--ui-shadow); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; opacity:.94; }
 .tree-item { user-select:none; cursor:grab; }
