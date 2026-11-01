@@ -35,6 +35,7 @@ export interface UpdateStatus { state: 'unavailable' | 'idle' | 'checking' | 'av
 export interface WhiteboardBridge {
   load(): Promise<Snapshot>;
   openWorkspaceFolder(): Promise<void>;
+  revealNode(nodeId: string): Promise<void>;
   createNode(parentId: string | null, kind: NodeKind, title: string): Promise<string>;
   createDocumentPage(sectionId: string, assetId: string): Promise<string>;
   renameNode(nodeId: string, title: string): Promise<void>;

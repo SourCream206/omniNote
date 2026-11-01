@@ -77,6 +77,13 @@ function registerIpc() {
 
   handle('workspace:load', () => store.load());
   handle('workspace:open-folder', async () => { const error = await shell.openPath(store.directory); if (error) throw new Error(error); });
+  handle('node:reveal', async (nodeId) => {
+    if (typeof nodeId !== 'string' || !store.getNode(nodeId)) throw new Error('Item not found');
+    const document = store.db.prepare('SELECT asset_id FROM document_pages WHERE page_id=?').get(nodeId);
+    if (document) { shell.showItemInFolder(store.assetPath(document.asset_id).absolutePath); return; }
+    const error = await shell.openPath(store.directory);
+    if (error) throw new Error(error);
+  });
   handle('node:create', (parentId, kind, title) => store.createNode(parentId, kind, title));
   handle('document-page:create', (sectionId, assetId) => store.createDocumentPage(sectionId, assetId));
   handle('node:rename', (nodeId, title) => store.renameNode(nodeId, title));
