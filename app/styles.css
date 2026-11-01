@@ -451,6 +451,9 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .tree-item.drop-inside::after { left:calc(var(--drop-indent) + 18px); }
 .editor-panes.split .editor-pane.active { border-color:var(--ui-line); }
 .tree-menu { min-width:156px; }
+.tree-scroll { overflow-x:hidden; overflow-y:auto; scrollbar-width:none; }
+.tree-scroll::-webkit-scrollbar { display:none; }
+.tree-menu { position:fixed; right:auto; z-index:150; max-height:calc(100vh - 16px); overflow-y:auto; }
 .tree-menu button { white-space:nowrap; }
 .sidebar-width-resizer { top:39px; background:transparent; }
 .sidebar-width-resizer:hover, .sidebar-width-resizer:focus { background:transparent; }
