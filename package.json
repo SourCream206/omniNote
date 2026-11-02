@@ -2,8 +2,10 @@
   "name": "omninote",
   "desktopName": "omninote.desktop",
   "private": true,
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Local-first infinite canvas notebook app",
+  "homepage": "https://sourcream206.github.io/omniNote/",
+  "repository": "https://github.com/SourCream206/omniNote",
   "main": "electron/main.cjs",
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.app.json && vite build",

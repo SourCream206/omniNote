@@ -18,6 +18,7 @@ module.exports = {
     target: ['AppImage', 'deb', 'rpm', 'pacman'],
     category: 'Office',
     icon: 'build/linux-icon.svg',
+    maintainer: 'SourCream206 <SourCream206@users.noreply.github.com>',
     syncDesktopName: true,
     artifactName: '${productName}-${version}-linux-${arch}.${ext}',
   },
