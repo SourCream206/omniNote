@@ -1,6 +1,6 @@
 # Phase 1 architecture decisions
 
-Status: approved plan; M0 input spike implemented and awaiting stylus-hardware feedback. Build and report one runnable milestone at a time.
+> Historical Electron plan. See [the proposed Tauri v2 plan](TAURI_PLAN.md). The existing Electron M0 input spike remains available as a reference; Tauri implementation awaits approval.
 
 ## Stack
 
