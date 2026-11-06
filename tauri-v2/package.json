@@ -1,16 +1,19 @@
 {
-  "name": "ink-lab-tauri-v2",
+  "name": "omninote-tauri",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/make-fixture.cjs",
-    "dev": "vite",
-    "prebuild": "node scripts/make-fixture.cjs",
-    "build": "tsc --noEmit && vite build",
+    "dev": "npm --prefix .. run dev:tauri",
+    "predev:ink-lab": "node scripts/make-fixture.cjs",
+    "dev:ink-lab": "vite",
+    "build": "npm --prefix .. run build:tauri",
+    "prebuild:ink-lab": "node scripts/make-fixture.cjs",
+    "build:ink-lab": "tsc --noEmit && vite build",
     "test": "tsc src/rendering.ts --target ES2022 --module ESNext --moduleResolution Bundler --outDir .test-build --skipLibCheck && node --test tests/rendering.test.mjs",
     "tauri": "tauri",
-    "start": "tauri dev"
+    "start": "tauri dev",
+    "start:ink-lab": "tauri dev --config src-tauri/tauri.ink-lab.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

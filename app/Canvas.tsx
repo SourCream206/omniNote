@@ -164,9 +164,15 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       }
     };
     window.addEventListener('beforeunload', beforeUnload);
+    const flushForClose = (event: Event) => {
+      const detail = (event as CustomEvent<{ waitUntil(save: Promise<void>): void }>).detail;
+      detail.waitUntil(flushPendingSave());
+    };
+    window.addEventListener('omninote:flush-save', flushForClose);
     return () => {
       observer.disconnect();
       window.removeEventListener('beforeunload', beforeUnload);
+      window.removeEventListener('omninote:flush-save', flushForClose);
       if (inkFrame.current !== null) cancelAnimationFrame(inkFrame.current);
       void flushPendingSave().catch(onError);
     };
