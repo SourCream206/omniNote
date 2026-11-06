@@ -1,6 +1,6 @@
 # Proposed phase 1 plan: Tauri v2
 
-**Status: awaiting approval.** This is a fresh Tauri app with no user-data migration requirement. Reuse React, TypeScript, tests, document fixtures, and proven interaction patterns from the Electron app. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
+**Status: approved; M0 ink spike in progress.** This is a fresh Tauri app with no user-data migration requirement. Reuse React, TypeScript, tests, document fixtures, and proven interaction patterns from the Electron app. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
 
 ## Scope and architecture
 
@@ -80,7 +80,7 @@ Add a dedicated `/extensions/` page to the existing GitHub Pages download site. 
 | **M5 Extensions** | Broker, worker/iframe host, example, searchable in-app and Pages catalog | Denied grant/malformed package tests, offline use, catalog publication test. |
 | **M6 Release** | Windows installer/updater; macOS/Linux smoke builds when available | Fresh install, update, workspace reopen, platform-specific ink/viewer checklist. |
 
-Each milestone is built only after the previous gate passes and is handed off with run instructions, a test checklist, results, and known limits. No implementation begins before this proposal is approved.
+Each milestone is built only after the previous gate passes and is handed off with run instructions, a test checklist, results, and known limits.
 
 ## Remaining risks and naming
 

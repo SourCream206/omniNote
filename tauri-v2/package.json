@@ -1,0 +1,22 @@
+{
+  "name": "ink-lab-tauri-v2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/make-fixture.cjs",
+    "dev": "vite",
+    "prebuild": "node scripts/make-fixture.cjs",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "start": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.3.289"
+  }
+}
