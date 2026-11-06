@@ -455,6 +455,19 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .tree-scroll::-webkit-scrollbar { display:none; }
 .tree-menu { position:fixed; right:auto; z-index:150; max-height:calc(100vh - 16px); overflow-y:auto; }
 .tree-menu button { white-space:nowrap; }
+.sidebar-create { position:relative; }
+.sidebar-create-menu { position:absolute; top:28px; right:0; z-index:160; width:145px; padding:4px; border:1px solid var(--ui-line); border-radius:6px; background:var(--ui-surface); box-shadow:0 8px 22px var(--ui-shadow); letter-spacing:normal; }
+.sidebar-create-menu button { display:block; width:100%; padding:7px 8px; border:0; border-radius:4px; background:transparent; color:var(--ui-text); text-align:left; font-size:11px; font-weight:400; }
+.sidebar-create-menu button:hover:not(:disabled) { background:var(--ui-hover); color:var(--ui-accent); }
+.text-color-control { display:flex; align-items:center; gap:5px; padding:0 5px; color:var(--ui-muted); font-size:10px; font-weight:400; letter-spacing:normal; white-space:nowrap; }
+.text-color-control input { width:25px; height:23px; padding:1px; border:1px solid var(--ui-line); border-radius:4px; background:transparent; cursor:pointer; }
+.resize-handle { right:auto; bottom:auto; touch-action:none; }
+.resize-n,.resize-s,.resize-e,.resize-w { border:0; border-radius:0; background:transparent; box-shadow:none; }
+.resize-n,.resize-s { left:8px; right:8px; width:auto; height:8px; cursor:ns-resize; }
+.resize-e,.resize-w { top:8px; bottom:8px; width:8px; height:auto; cursor:ew-resize; }
+.resize-n { top:-4px; }.resize-s { bottom:-4px; }.resize-e { right:-4px; }.resize-w { left:-4px; }
+.resize-ne { top:-5px; right:-5px; cursor:nesw-resize; }.resize-nw { top:-5px; left:-5px; cursor:nwse-resize; }
+.resize-se { bottom:-5px; right:-5px; cursor:nwse-resize; }.resize-sw { bottom:-5px; left:-5px; cursor:nesw-resize; }
 .sidebar-width-resizer { top:39px; background:transparent; }
 .sidebar-width-resizer:hover, .sidebar-width-resizer:focus { background:transparent; }
 .sidebar-width-resizer::after { content:""; position:absolute; top:50%; left:50%; width:2px; height:40px; transform:translate(-50%,-50%); border-radius:2px; background:var(--ui-line); pointer-events:none; }

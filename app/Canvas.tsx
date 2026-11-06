@@ -6,13 +6,14 @@ import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
-import { FontSize, TextStyle } from '@tiptap/extension-text-style';
+import { Color, FontSize, TextStyle } from '@tiptap/extension-text-style';
 import { Bold, Italic, Underline as UnderlineIcon, List, ListChecks, Link2, MousePointer2, PenLine, Highlighter, Eraser, Hand, Scan, Undo2, Redo2, Group, Ungroup, BringToFront, SendToBack, Copy, Scissors, ClipboardPaste, Files, Trash2, Minus, Plus, Maximize2, ChevronDown, Type, StickyNote, Move, File } from 'lucide-react';
 import type { Asset, Camera, CanvasObject, CanvasTool, ExtensionInfo, InkPoint, PageRow, TreeNode } from './types';
 import { eraseInk, inkPath, pointInPolygon } from './ink';
 import ExtensionFrame from './ExtensionFrame';
 import FullscreenControl, { type FullscreenScope } from './FullscreenControl';
 import { documentViewer, previewFormats } from './documentViewers';
+import { resizeObject, type ResizeEdge } from './resize';
 
 const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
@@ -20,7 +21,7 @@ export interface CanvasHandle { insertText(text: string): void; insertAsset(asse
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onCameraChange(pageId: string, camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
-type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; points?: InkPoint[]; lasso?: Point[] };
+type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; resizeEdge?: ResizeEdge; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 const clone = (objects: CanvasObject[]) => objects.map((object) => ({ ...object, payload: structuredClone(object.payload) }));
 const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
@@ -72,6 +73,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [partialEraser, setPartialEraser] = useState(false);
   const [formatOpen, setFormatOpen] = useState(true);
   const [selectedFontSize, setSelectedFontSize] = useState<{ id: string; size: string } | null>(null);
+  const [selectedFontColor, setSelectedFontColor] = useState<{ id: string; color: string } | null>(null);
   const [attachmentMenuId, setAttachmentMenuId] = useState<string | null>(null);
   const [focusToolsOpen, setFocusToolsOpen] = useState(false);
   const [focusTextId, setFocusTextId] = useState<string | null>(null);
@@ -286,7 +288,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     updateCamera({ x: origin.x - (origin.x - old.x) * nextZoom / old.zoom, y: origin.y - (origin.y - old.y) * nextZoom / old.zoom, zoom: nextZoom });
   }
 
-  function startObjectGesture(event: React.PointerEvent, object: CanvasObject, kind: 'move' | 'resize') {
+  function startObjectGesture(event: React.PointerEvent, object: CanvasObject, kind: 'move' | 'resize', resizeEdge?: ResizeEdge) {
     if (event.button !== 0) return;
     const explicitHandle = Boolean((event.target as HTMLElement).closest('.audio-move-handle, .attachment-move, .note-move-handle'));
     if (toolRef.current !== 'select' && object.type !== 'text' && !explicitHandle) return;
@@ -295,7 +297,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const nextSelected = event.shiftKey ? [...new Set([...selectedRef.current, ...group])] : selectedRef.current.includes(object.id) ? selectedRef.current : group;
     updateSelected(nextSelected);
     const point = world(screen(event.nativeEvent));
-    gesture.current = { kind, pointerId: event.pointerId, start: point, camera: cameraRef.current, objects: objectsRef.current, selected: nextSelected, targetId: object.id };
+    gesture.current = { kind, pointerId: event.pointerId, start: point, camera: cameraRef.current, objects: objectsRef.current, selected: nextSelected, targetId: object.id, resizeEdge };
     viewport.current?.setPointerCapture(event.pointerId);
   }
 
@@ -352,15 +354,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const position = world(point);
     if (current.kind === 'pan') { updateCamera({ ...current.camera, x: current.camera.x + point.x - current.start.x, y: current.camera.y + point.y - current.start.y }); return; }
     if (current.kind === 'move') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => current.selected.includes(object.id) ? { ...object, x: object.x + dx, y: object.y + dy } : object)); return; }
-    if (current.kind === 'resize') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => {
-      if (object.id !== current.targetId) return object;
-      if (object.type === 'image') {
-        const change = Math.abs(dx / object.width) >= Math.abs(dy / object.height) ? dx / object.width : dy / object.height;
-        const scale = Math.max(90 / object.width, 70 / object.height, 1 + change);
-        return { ...object, width: object.width * scale, height: object.height * scale };
-      }
-      return { ...object, width: Math.max(90, object.width + dx), height: Math.max(object.type === 'audio' ? 54 : 70, object.height + dy) };
-    })); return; }
+    if (current.kind === 'resize') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => object.id === current.targetId ? resizeObject(object, current.resizeEdge ?? 'se', dx, dy) : object)); return; }
     if (current.kind === 'erase') { updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser)); return; }
     if (current.kind === 'lasso') { current.lasso!.push(position); setLasso([...current.lasso!]); return; }
     const coalesced = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent];
@@ -391,6 +385,13 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       setLasso([]);
     } else if (['move','resize','erase'].includes(current.kind)) record(current.objects);
     gesture.current = null;
+    if (current.kind === 'resize' && current.targetId) {
+      const id = current.targetId;
+      requestAnimationFrame(() => {
+        const content = [...(viewport.current?.querySelectorAll<HTMLElement>('.canvas-object.object-text') ?? [])].find((element) => element.dataset.objectId === id)?.querySelector<HTMLElement>('.rich-content');
+        if (content) fitPlainText(id, content.getBoundingClientRect().height / cameraRef.current.zoom);
+      });
+    }
     try { viewport.current?.releasePointerCapture(event.pointerId); } catch { /* already released */ }
   }
 
@@ -482,7 +483,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   function fitPlainText(id: string, height: number) {
     const nextHeight = Math.max(28, Math.ceil(height + 4));
     const current = objectsRef.current.find((object) => object.id === id);
-    if (!current || current.type !== 'text' || textAppearance(current).color || Math.abs(current.height - nextHeight) < 1) return;
+    if (!current || current.type !== 'text' || textAppearance(current).color || gesture.current?.targetId === id && gesture.current.kind === 'resize' || nextHeight <= current.height) return;
     updateObjects(objectsRef.current.map((object) => object.id === id ? { ...object, height: nextHeight } : object));
   }
   function beginTextEdit(id: string) { if (!textEditStart.current.has(id)) textEditStart.current.set(id, objectsRef.current); }
@@ -563,18 +564,18 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   return <div className={`canvas-shell ${focusMode ? 'focus-canvas' : ''}`}>
     {focusMode && showToolbar && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button></div>}
     {toolbar && (toolbarPortalTarget && !focusMode ? createPortal(toolbar, toolbarPortalTarget) : toolbar)}
-    {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} nodes={nodes} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
+    {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} fontColor={selectedFontColor?.id === selectedObject.id ? selectedFontColor.color : '#263550'} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
     <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const point = screen(event.nativeEvent); const position = world(point); const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId) ?? [...objectsRef.current].sort((a, b) => b.z_index - a.z_index).find((item) => position.x >= item.x && position.x <= item.x + item.width && position.y >= item.y && position.y <= item.y + item.height); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point, objectId: object?.id ?? null }); setAttachmentMenuId(null); }} style={{ backgroundPosition: row.paper_style === 'lines' ? `0 ${camera.y}px` : `${camera.x}px ${camera.y}px`, backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px` }}>
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>
           {object.type !== 'ink' && object.type !== 'text' && selected.includes(object.id) && tool === 'select' && <div className="attachment-menu" onPointerDown={(event) => event.stopPropagation()}><button className="attachment-menu-trigger" type="button" title="Attachment options" aria-label={`Options for ${(object.payload as { name?: string }).name ?? object.type}`} aria-expanded={attachmentMenuId === object.id} onClick={() => { updateSelected([object.id]); setAttachmentMenuId(attachmentMenuId === object.id ? null : object.id); }}><ChevronDown size={14} /></button><button className="attachment-move" type="button" title="Drag attachment" aria-label="Drag attachment" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={13} /></button>{attachmentMenuId === object.id && <div className="attachment-popover"><strong>{(object.payload as { name?: string }).name ?? object.type}</strong>{object.type !== 'extension' && <button onClick={() => { setAttachmentMenuId(null); window.whiteboard.openOriginal((object.payload as { assetId: string }).assetId).catch(onError); }}>Open original</button>}{(object.type === 'extension' || (object.type === 'document' && !fileNeedsTile(object, extensions))) && <button onClick={() => { setAttachmentMenuId(null); setActiveDoc(activeDoc === object.id ? null : object.id); updateSelected([object.id]); }}>{activeDoc === object.id ? 'Exit interaction' : 'Interact with content'}</button>}{object.type === 'document' && !fileNeedsTile(object, extensions) && ['pdf','docx'].includes((object.payload as { format: string }).format) && <button onClick={() => { setAttachmentMenuId(null); setDocumentPresentation(object.id, (object.payload as { presentation?: string }).presentation === 'printout' ? 'block' : 'printout').catch(onError); }}>Show as {(object.payload as { presentation?: string }).presentation === 'printout' ? 'embedded block' : 'page printout'}</button>}</div>}</div>}
-          {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onHeightChange={(height) => fitPlainText(object.id, height)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
+          {object.type === 'text' && <><TextBlock object={object} autoFocus={focusTextId === object.id} onChange={(doc) => updateText(object.id, doc)} onHeightChange={(height) => fitPlainText(object.id, height)} onFontSizeChange={(size) => setSelectedFontSize({ id: object.id, size })} onFontColorChange={(color) => setSelectedFontColor({ id: object.id, color })} onNavigatePage={onNavigatePage} onOpenExternal={(url) => window.whiteboard.openExternal(url).catch(onError)} onSelect={() => { updateSelected([object.id]); if (toolRef.current === 'text') updateTool('select'); }} onBeginEdit={() => beginTextEdit(object.id)} onEndEdit={() => endTextEdit(object.id)} /><button className="note-move-handle" title="Drag to move note" aria-label="Drag to move note" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><Move size={14} /></button></>}
           {object.type === 'ink' && <svg className="ink-svg" viewBox={`0 0 ${object.width} ${object.height}`} overflow="visible" onPointerDown={(event) => startObjectGesture(event, object, 'move')}><InkShape payload={object.payload as InkPayload} /></svg>}
           {object.type === 'image' && <ImageBlock assetId={(object.payload as { assetId: string }).assetId} onLoad={(width, height) => fitImage(object.id, width, height)} onPreviewFailure={() => previewUnavailable(object.id)} />}
           {(object.type === 'audio' || object.type === 'video') && <MediaBlock object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} onSelect={() => { if (toolRef.current === 'select') updateSelected([object.id]); }} onMove={(event) => startObjectGesture(event, object, 'move')} onPreviewFailure={() => previewUnavailable(object.id)} />}
           {object.type === 'document' && (fileNeedsTile(object, extensions) ? <FileTile name={(object.payload as FilePayload).name} /> : <Suspense fallback={<div className="document-loading">Loading preview…</div>}><DocumentPreview object={object} asset={localAssets.find((asset) => asset.id === (object.payload as { assetId: string }).assetId)} viewer={viewerFor((object.payload as { format: string }).format)} interactive={activeDoc === object.id} onContentSize={(size) => resizePrintout(object.id, size)} onPreviewFailure={() => previewUnavailable(object.id)} onError={onError} /></Suspense>)}
           {object.type === 'extension' && <ExtensionObject object={object} extensions={extensions} interactive={activeDoc === object.id} onError={onError} />}
-          {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && <div className="resize-handle" onPointerDown={(event) => startObjectGesture(event, object, 'resize')} />}
+          {selected.includes(object.id) && tool === 'select' && object.type !== 'ink' && (['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'] as ResizeEdge[]).map((edge) => <div key={edge} className={`resize-handle resize-${edge}`} role="button" aria-label={`Resize ${edge} edge`} onPointerDown={(event) => startObjectGesture(event, object, 'resize', edge)} />)}
         </div>)}
         {ink && <svg className="live-ink" overflow="visible"><path d={inkPath(ink.points.map((point) => ({ ...point, x: point.x, y: point.y })), width * (ink.highlighter ? 3.5 : 1))} fill={color} opacity={ink.highlighter ? 0.35 : 1} /></svg>}
         {lasso.length > 1 && <svg className="lasso-overlay" overflow="visible"><polyline points={lasso.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="#4471d0" strokeWidth={2 / camera.zoom} strokeDasharray="5 4" /></svg>}
@@ -612,7 +613,7 @@ const InkShape = memo(function InkShape({ payload }: { payload: InkPayload }) {
 
 function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} aria-pressed={active === tool} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }
 
-function RichToolbar({ selectedObject, fontSize, onAction, onRequestLink, nodes, appearance, onAppearance }: { selectedObject?: CanvasObject; fontSize: string; onAction(action: string): void; onRequestLink(): Promise<string | null>; nodes: TreeNode[]; appearance: TextAppearance; onAppearance(value: TextAppearance): void }) {
+function RichToolbar({ selectedObject, fontSize, fontColor, onAction, onRequestLink, appearance, onAppearance }: { selectedObject?: CanvasObject; fontSize: string; fontColor: string; onAction(action: string): void; onRequestLink(): Promise<string | null>; appearance: TextAppearance; onAppearance(value: TextAppearance): void }) {
   const active = selectedObject?.type === 'text';
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const appearanceRef = useRef<HTMLDivElement>(null);
@@ -626,15 +627,16 @@ function RichToolbar({ selectedObject, fontSize, onAction, onRequestLink, nodes,
     return () => document.removeEventListener('pointerdown', close, true);
   }, [appearanceOpen]);
   const link = async () => { const url = await onRequestLink(); if (url) onAction(`link:${url}`); };
-  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><select className="font-size-select" aria-label="Text size" title="Text size" disabled={!active} value={fontSize} onChange={(event) => onAction(`size:${event.target.value || 'default'}`)}><option value="">Default · 14</option>{[12, 14, 16, 18, 20, 24, 28, 32, 40, 48].map((size) => <option key={size} value={`${size}px`}>{size}</option>)}</select><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button><select aria-label="Link to page or section" disabled={!active} value="" onChange={(event) => { const [kind, id] = event.target.value.split(':'); if (id) onAction(`link:whiteboard://${kind}/${id}`); }}><option value="">Link to page/section…</option>{nodes.filter((node) => node.kind === 'page' || node.kind === 'section').map((node) => <option key={node.id} value={`${node.kind}:${node.id}`}>{node.kind === 'section' ? '§ ' : ''}{node.title}</option>)}</select><ChevronDown className="rich-chevron" size={12} />{appearance.color && <div className="note-appearance" ref={appearanceRef}><button title="Sticky Note appearance" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((open) => !open)}><StickyNote size={15} /> Appearance</button>{appearanceOpen && <div className="appearance-menu"><label>Color <input aria-label="Sticky Note color" type="color" value={appearance.color} onChange={(event) => onAppearance({ ...appearance, color: event.target.value })} /></label><label>Opacity <input aria-label="Sticky Note opacity" type="range" min="0" max="100" value={appearance.opacity} onChange={(event) => onAppearance({ ...appearance, opacity: Number(event.target.value) })} /><span>{appearance.opacity}%</span></label></div>}</div>}</div>;
+  return <div className={`rich-toolbar ${active ? '' : 'disabled'}`}><span className="rich-label">TEXT</span><button title="Bold" disabled={!active} onClick={() => onAction('bold')}><Bold size={15} /></button><button title="Italic" disabled={!active} onClick={() => onAction('italic')}><Italic size={15} /></button><button title="Underline" disabled={!active} onClick={() => onAction('underline')}><UnderlineIcon size={15} /></button><span className="toolbar-divider" /><select className="font-size-select" aria-label="Text size" title="Text size" disabled={!active} value={fontSize} onChange={(event) => onAction(`size:${event.target.value || 'default'}`)}><option value="">Default · 14</option>{[12, 14, 16, 18, 20, 24, 28, 32, 40, 48].map((size) => <option key={size} value={`${size}px`}>{size}</option>)}</select><label className="text-color-control" title="Text color"><span>Text color</span><input type="color" aria-label="Text color" disabled={!active} value={fontColor} onChange={(event) => onAction(`color:${event.target.value}`)} /></label><button title="Bulleted list" disabled={!active} onClick={() => onAction('list')}><List size={15} /></button><button title="Checkbox list" disabled={!active} onClick={() => onAction('checklist')}><ListChecks size={15} /></button><button title="Add link" disabled={!active} onClick={link}><Link2 size={15} /></button>{appearance.color && <div className="note-appearance" ref={appearanceRef}><button title="Sticky Note appearance" aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((open) => !open)}><StickyNote size={15} /> Appearance</button>{appearanceOpen && <div className="appearance-menu"><label>Color <input aria-label="Sticky Note color" type="color" value={appearance.color} onChange={(event) => onAppearance({ ...appearance, color: event.target.value })} /></label><label>Opacity <input aria-label="Sticky Note opacity" type="range" min="0" max="100" value={appearance.opacity} onChange={(event) => onAppearance({ ...appearance, opacity: Number(event.target.value) })} /><span>{appearance.opacity}%</span></label></div>}</div>}</div>;
 }
 
-function TextBlock({ object, autoFocus, onChange, onHeightChange, onFontSizeChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; autoFocus: boolean; onChange(doc: unknown): void; onHeightChange(height: number): void; onFontSizeChange(size: string): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
+function TextBlock({ object, autoFocus, onChange, onHeightChange, onFontSizeChange, onFontColorChange, onNavigatePage, onOpenExternal, onSelect, onBeginEdit, onEndEdit }: { object: CanvasObject; autoFocus: boolean; onChange(doc: unknown): void; onHeightChange(height: number): void; onFontSizeChange(size: string): void; onFontColorChange(color: string): void; onNavigatePage(id: string): void; onOpenExternal(url: string): void; onSelect(): void; onBeginEdit(): void; onEndEdit(): void }) {
   const rightPointerDown = useRef(false);
   const onHeightChangeRef = useRef(onHeightChange);
   onHeightChangeRef.current = onHeightChange;
   const currentFontSize = (editor: { getAttributes(name: string): Record<string, unknown> }) => String(editor.getAttributes('textStyle').fontSize ?? '');
-  const editor = useEditor({ extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), TaskList, TaskItem.configure({ nested: true }), TextStyle, FontSize], content: (object.payload as { doc: unknown }).doc as object, onUpdate: ({ editor }) => { onChange(editor.getJSON()); onFontSizeChange(currentFontSize(editor)); }, onSelectionUpdate: ({ editor }) => onFontSizeChange(currentFontSize(editor)), editorProps: { attributes: { class: 'rich-content' }, handleClick: (_view, _pos, event) => {
+  const currentFontColor = (editor: { getAttributes(name: string): Record<string, unknown> }) => String(editor.getAttributes('textStyle').color ?? '#263550');
+  const editor = useEditor({ extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), TaskList, TaskItem.configure({ nested: true }), TextStyle, FontSize, Color], content: (object.payload as { doc: unknown }).doc as object, onUpdate: ({ editor }) => { onChange(editor.getJSON()); onFontSizeChange(currentFontSize(editor)); onFontColorChange(currentFontColor(editor)); }, onSelectionUpdate: ({ editor }) => { onFontSizeChange(currentFontSize(editor)); onFontColorChange(currentFontColor(editor)); }, editorProps: { attributes: { class: 'rich-content' }, handleClick: (_view, _pos, event) => {
     const link = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
     if (!link) return false;
     const href = link.getAttribute('href') || '';
@@ -665,6 +667,7 @@ function TextBlock({ object, autoFocus, onChange, onHeightChange, onFontSizeChan
       if (action === 'underline') editor.chain().focus().toggleUnderline().run();
       if (action === 'size:default') editor.chain().focus().unsetFontSize().run();
       else if (/^size:(12|14|16|18|20|24|28|32|40|48)px$/.test(action)) editor.chain().focus().setFontSize(action.slice(5)).run();
+      if (/^color:#[0-9a-f]{6}$/i.test(action)) editor.chain().focus().setColor(action.slice(6)).run();
       if (action === 'list') editor.chain().focus().toggleBulletList().run();
       if (action === 'checklist') editor.chain().focus().toggleTaskList().run();
       if (action.startsWith('link:')) editor.chain().focus().setLink({ href: action.slice(5) }).run();
@@ -672,7 +675,7 @@ function TextBlock({ object, autoFocus, onChange, onHeightChange, onFontSizeChan
     document.addEventListener('whiteboard:text-command', handler);
     return () => document.removeEventListener('whiteboard:text-command', handler);
   }, [editor, object.id]);
-  return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); rightPointerDown.current = event.button === 2; if (event.button === 0) onSelect(); }} onContextMenu={() => { setTimeout(() => { rightPointerDown.current = false; }, 0); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { if (!rightPointerDown.current) onSelect(); onBeginEdit(); if (editor) onFontSizeChange(currentFontSize(editor)); }} onBlur={() => { rightPointerDown.current = false; onEndEdit(); }}><EditorContent editor={editor} /></div>;
+  return <div className="text-body" onPointerDown={(event) => { event.stopPropagation(); rightPointerDown.current = event.button === 2; if (event.button === 0) onSelect(); }} onContextMenu={() => { setTimeout(() => { rightPointerDown.current = false; }, 0); }} onClick={(event) => { if (!(event.target as HTMLElement).closest('a[href]') && !editor?.isFocused) editor?.commands.focus('end'); }} onFocus={() => { if (!rightPointerDown.current) onSelect(); onBeginEdit(); if (editor) { onFontSizeChange(currentFontSize(editor)); onFontColorChange(currentFontColor(editor)); } }} onBlur={() => { rightPointerDown.current = false; onEndEdit(); }}><EditorContent editor={editor} /></div>;
 }
 
 function FileTile({ name }: { name: string }) {

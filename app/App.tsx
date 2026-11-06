@@ -56,7 +56,9 @@ export default function App() {
   const [sectionId, setSectionId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [openTreeMenuId, setOpenTreeMenuId] = useState<string | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<'explorer' | 'extensions' | 'settings' | null>('explorer');
+  useEffect(() => { setCreateMenuOpen(false); }, [activePanel]);
   const [theme, setTheme] = useState<ThemeId>(readTheme);
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [focusMode, setFocusMode] = useState(false);
@@ -73,6 +75,7 @@ export default function App() {
   const exportRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLDivElement>(null);
   const insertRef = useRef<HTMLDivElement>(null);
+  const createRef = useRef<HTMLDivElement>(null);
   const tabPointer = useRef<{ id: string; pane: 0 | 1; x: number; y: number } | null>(null);
   const suppressTabClick = useRef(false);
   const treePointer = useRef<{ id: string; x: number; y: number } | null>(null);
@@ -121,9 +124,10 @@ export default function App() {
       if (!exportRef.current?.contains(event.target as Node)) setExportOpen(false);
       if (!paperRef.current?.contains(event.target as Node)) setPaperOpen(false);
       if (!insertRef.current?.contains(event.target as Node)) setInsertOpen(false);
+      if (!createRef.current?.contains(event.target as Node)) setCreateMenuOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setExportOpen(false); setPaperOpen(false); setInsertOpen(false); }
+      if (event.key === 'Escape') { setExportOpen(false); setPaperOpen(false); setInsertOpen(false); setCreateMenuOpen(false); }
     };
     document.addEventListener('pointerdown', closeMenus, true);
     document.addEventListener('keydown', closeOnEscape);
@@ -573,7 +577,7 @@ export default function App() {
       <nav className="activity-rail" aria-label="Primary navigation"><button className={activePanel === 'explorer' ? 'active' : ''} title="Toggle notebooks and pages" aria-label="Toggle notebooks and pages" aria-expanded={activePanel === 'explorer'} onClick={() => setActivePanel((panel) => panel === 'explorer' ? null : 'explorer')}><BookOpen size={20} /></button><button className={activePanel === 'extensions' ? 'active' : ''} title="Extensions" aria-label="Extensions" aria-expanded={activePanel === 'extensions'} onClick={() => setActivePanel((panel) => panel === 'extensions' ? null : 'extensions')}><Puzzle size={20} /></button>{['available', 'downloaded'].includes(updateStatus.state) && <button className="update-trigger" title={`Install omniNote ${updateStatus.version ?? 'update'}`} aria-label={`Install update ${updateStatus.version ?? ''}`} onClick={promptUpdate}><Download size={19} /><span className="update-dot" /></button>}<button className={`settings-trigger ${activePanel === 'settings' ? 'active' : ''}`} title="Settings" aria-label="Settings" aria-expanded={activePanel === 'settings'} onClick={() => setActivePanel((panel) => panel === 'settings' ? null : 'settings')}><Settings2 size={20} /></button></nav>
       {activePanel && <aside className="notebook-sidebar" aria-label={activePanel === 'explorer' ? 'Explorer' : activePanel === 'extensions' ? 'Extensions' : 'Settings'} style={{ width: sidebarWidth, flexBasis: sidebarWidth }}>
         {activePanel === 'explorer' ? <>
-        <div className="sidebar-title"><span>EXPLORER</span><button className="icon-button small" title="New notebook" aria-label="New notebook" onClick={() => createNode('notebook', null)}><Plus size={16} /></button></div>
+        <div className="sidebar-title"><span>EXPLORER</span><div className="sidebar-create" ref={createRef}><button className="icon-button small" title="Create" aria-label="Create notebook, folder, or page" aria-expanded={createMenuOpen} aria-haspopup="menu" onClick={() => setCreateMenuOpen((open) => !open)}><Plus size={16} /></button>{createMenuOpen && <div className="sidebar-create-menu" role="menu"><button role="menuitem" onClick={() => { setCreateMenuOpen(false); void createNode('notebook', null); }}>New notebook</button><button role="menuitem" disabled={!sectionId && !nodes.some((node) => node.kind === 'notebook')} onClick={() => { setCreateMenuOpen(false); void createNode('folder', sectionId ?? nodes.find((node) => node.kind === 'notebook')?.id ?? null); }}>New folder</button><button role="menuitem" disabled={!sectionId && !nodes.some((node) => node.kind === 'notebook')} onClick={() => { setCreateMenuOpen(false); void createNode('page', sectionId ?? nodes.find((node) => node.kind === 'notebook')?.id ?? null); }}>New page</button></div>}</div></div>
         <div className="tree-scroll" role="tree" aria-label="Notebooks" onScroll={() => setOpenTreeMenuId(null)} onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && sectionId) event.preventDefault(); }} onDrop={(event) => { if (event.dataTransfer.files.length && sectionId) { event.preventDefault(); void importFilesToSection(Array.from(event.dataTransfer.files), sectionId); } }}>
           {(childrenByParent.get(null) ?? []).filter((node) => node.kind === 'notebook').map((node) => <TreeItem key={node.id} node={node} childrenByParent={childrenByParent} documentIcons={documentIcons} depth={0} expanded={expanded} openMenuId={openTreeMenuId} onOpenMenu={setOpenTreeMenuId} onToggle={(id) => setExpanded((before) => { const next = new Set(before); next.has(id) ? next.delete(id) : next.add(id); return next; })} selectedSectionId={sectionId} selectedPageId={activePageId} treeDrop={treeDrag?.target ?? null} dragSourceId={treeDrag?.id ?? null} onTreePointerDown={(id, event) => { treePointer.current = { id, x: event.clientX, y: event.clientY }; event.currentTarget.setPointerCapture(event.pointerId); }} onTreePointerCancel={() => { treePointer.current = null; setTreeDrag(null); }} suppressTreeClick={suppressTreeClick} onSelect={(selected) => { if (selected.kind === 'page') openPage(selected.id, selected.parent_id); else { openPage(firstPageIn(nodes, selected.id), selected.id); setExpanded((before) => new Set([...before, selected.id])); } }} onCreate={createNode} onRename={renameNode} onDelete={deleteNode} onImportFiles={importFilesToSection} onPickDocuments={pickDocumentsForSection} onReveal={(selected) => window.whiteboard.revealNode(selected.id).catch(notifyError)} onAppearance={setFolderAppearance} />)}
           {!nodes.length && <div className="empty-sidebar">Create your first notebook to begin.</div>}
