@@ -17,7 +17,7 @@ fn parse_id(id: &str) -> Result<Uuid, String> {
     Uuid::parse_str(id).map_err(|_| "Invalid node ID".to_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn load_workspace(state: State<'_, WorkspaceState>) -> Result<Value, String> {
     let workspace = state.0.lock().map_err(|_| "Workspace lock failed")?;
     let all_nodes = workspace.list_all_nodes().map_err(|error| error.to_string())?;
@@ -88,7 +88,7 @@ fn move_node(state: State<'_, WorkspaceState>, node_id: String, parent_id: Optio
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn import_asset_raw(state: State<'_, WorkspaceState>, request: Request<'_>) -> Result<omninote_workspace_core::Asset, String> {
     let InvokeBody::Raw(bytes) = request.body() else { return Err("Expected file bytes".to_owned()) };
     if bytes.is_empty() || bytes.len() > 512 * 1024 * 1024 { return Err("File size is unsupported".to_owned()); }
@@ -100,14 +100,14 @@ fn import_asset_raw(state: State<'_, WorkspaceState>, request: Request<'_>) -> R
         .import_asset(&name, mime_type, bytes).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_asset(state: State<'_, WorkspaceState>, asset_id: String) -> Result<Response, String> {
     let bytes = state.0.lock().map_err(|_| "Workspace lock failed")?
         .read_asset(parse_id(&asset_id)?).map_err(|error| error.to_string())?;
     Ok(Response::new(bytes))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn pick_assets(app: tauri::AppHandle, state: State<'_, WorkspaceState>) -> Result<Vec<omninote_workspace_core::Asset>, String> {
     let selected = app.dialog().file().blocking_pick_files().unwrap_or_default();
     if selected.len() > 50 { return Err("Select up to 50 files at a time".to_owned()); }
@@ -118,7 +118,7 @@ fn pick_assets(app: tauri::AppHandle, state: State<'_, WorkspaceState>) -> Resul
     }).collect()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_workspace(app: tauri::AppHandle, state: State<'_, WorkspaceState>) -> Result<bool, String> {
     let Some(selected) = app.dialog().file()
         .add_filter("ZIP archive", &["zip"])
@@ -210,14 +210,14 @@ fn open_external(app: tauri::AppHandle, address: String) -> Result<(), String> {
     app.opener().open_url(address, None::<&str>).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_page(state: State<'_, WorkspaceState>, page_id: String, objects: Vec<Value>, camera: Value) -> Result<(), String> {
     let workspace = state.0.lock().map_err(|_| "Workspace lock failed")?;
     let (x, y, zoom) = camera_values(&camera)?;
     workspace.save_page(parse_id(&page_id)?, &objects, x, y, zoom).map_err(|error| error.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_camera(state: State<'_, WorkspaceState>, page_id: String, camera: Value) -> Result<(), String> {
     let workspace = state.0.lock().map_err(|_| "Workspace lock failed")?;
     let (x, y, zoom) = camera_values(&camera)?;

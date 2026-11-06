@@ -6,6 +6,15 @@ import type { WhiteboardBridge, Camera, CanvasObject, NodeKind, PaperStyle, Snap
 
 const unavailable = (feature: string): Promise<never> => Promise.reject(new Error(`${feature} is not available in the Tauri preview yet.`));
 const updateStatus: UpdateStatus = { state: 'unavailable', message: 'Updates are not configured in the Tauri preview.' };
+const pendingSaves = new Map<string, Promise<void>>();
+
+function saveInOrder(pageId: string, write: () => Promise<void>): Promise<void> {
+  const next = (pendingSaves.get(pageId) ?? Promise.resolve()).catch(() => {}).then(write);
+  pendingSaves.set(pageId, next);
+  const clear = () => { if (pendingSaves.get(pageId) === next) pendingSaves.delete(pageId); };
+  next.then(clear, clear);
+  return next;
+}
 
 async function pngFromImage(image: Image): Promise<Uint8Array> {
   const { width, height } = await image.size();
@@ -26,8 +35,8 @@ export function createTauriBridge(): WhiteboardBridge {
   return {
     load: () => invoke<Snapshot>('load_workspace'),
     createNode: (parentId: string | null, kind: NodeKind, title: string) => invoke('create_node', { parentId, kind, title }),
-    savePage: (pageId: string, objects: CanvasObject[], camera: Camera) => invoke('save_page', { pageId, objects, camera }),
-    saveCamera: (pageId: string, camera: Camera) => invoke('save_camera', { pageId, camera }),
+    savePage: (pageId: string, objects: CanvasObject[], camera: Camera) => saveInOrder(pageId, () => invoke('save_page', { pageId, objects, camera })),
+    saveCamera: (pageId: string, camera: Camera) => saveInOrder(pageId, () => invoke('save_camera', { pageId, camera })),
     savePageSync: () => { throw new Error('Wait for the page to finish saving before closing.'); },
     setPageStyle: (pageId: string, style: PaperStyle) => invoke('set_page_style', { pageId, style }),
     setFullScreen: (enabled: boolean) => appWindow.setFullscreen(enabled),
