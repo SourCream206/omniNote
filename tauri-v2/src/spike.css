@@ -89,6 +89,7 @@ h1 { margin: 7px 0 5px; font-size: clamp(18px, 1.65vw, 25px); letter-spacing: -.
 .surface[data-tool="hand"], .surface.space-pan { cursor: grab; }
 .surface:active[data-tool="hand"], .surface.space-pan:active { cursor: grabbing; }
 .surface canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#scene-ink, #worker-ink { transform-origin: 0 0; will-change: transform; }
 #worker-ink { display: none; }
 .canvas-hint { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; text-align: center; pointer-events: none; color: #71809a; }
 .canvas-hint.hidden { display: none; }

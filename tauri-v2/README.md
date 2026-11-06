@@ -11,7 +11,7 @@ npm ci
 npm run tauri dev
 ```
 
-`npm run build` checks TypeScript and builds the web UI. `cargo check` in `src-tauri` checks the native shell.
+`npm test` checks the stroke geometry and camera transform. `npm run build` checks TypeScript and builds the web UI. `cargo check` in `src-tauri` checks the native shell.
 
 ## Device test
 
@@ -28,8 +28,10 @@ The proposed 60 Hz gate is p95 contact-to-visible ink ≤50 ms, p95 active-ink f
 
 - Windows Tauri shell opens in WebView2 (Chromium 156 reported by the lab).
 - A 2,000-stroke, 48,000-point scene renders in main and worker modes. Mouse drawing adds a stroke in both.
+- Strokes retain vector input points and render as continuous pressure-sensitive outlines. The live tip is smoothed before the final outline reaches the last sample. Touch cannot start ink while the default filter is on, even if it arrives before the pen; touch can pan with the Hand tool.
+- Completed ink is painted on a separate canvas; active ink repaints only its overlay. Pan and zoom use a temporary composited transform, then repaint the vectors when movement settles. The worker path appends a new stroke without copying the entire scene on each pen lift.
 - The generated PDF is 300 pages, and page 300 renders alongside dense ink. Only the selected page is mounted to a canvas.
-- In one short mouse run, worker draw work was about 1.7 ms p95 with culling and 9.9 ms with a full redraw. These are diagnostic samples, not a device benchmark or a pass result.
+- Live metrics compare main and worker draw cost. The short mouse runs so far are functional checks, not a repeatable pen benchmark or a pass result.
 - TypeScript/Vite build, native `cargo check`, and the existing Electron regression suite pass.
 
 **Still required for M0:** HP Envy stylus and palm test, contact-to-visible video timing, a 20-minute stress run, and a decision on whether the worker path improves the actual pen experience.

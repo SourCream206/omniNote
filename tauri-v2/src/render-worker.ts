@@ -4,6 +4,7 @@ type Camera = { x: number; y: number; scale: number };
 type Message =
   | { type: 'init'; canvas: OffscreenCanvas }
   | { type: 'scene'; strokes: Stroke[] }
+  | { type: 'append'; stroke: Stroke }
   | { type: 'viewport'; width: number; height: number; dpr: number; camera: Camera; culling: boolean };
 
 let canvas: OffscreenCanvas | null = null;
@@ -27,7 +28,7 @@ function render() {
   for (const stroke of strokes) {
     if (strokeVisible(stroke, camera, viewport.width, viewport.height, culling)) drawStroke(context, stroke);
   }
-  self.postMessage({ type: 'draw-time', ms: performance.now() - start });
+  self.postMessage({ type: 'draw-time', ms: performance.now() - start, camera: { ...camera } });
 }
 
 self.onmessage = (event: MessageEvent<Message>) => {
@@ -37,6 +38,8 @@ self.onmessage = (event: MessageEvent<Message>) => {
     context = canvas.getContext('2d');
   } else if (message.type === 'scene') {
     strokes = message.strokes;
+  } else if (message.type === 'append') {
+    strokes.push(message.stroke);
   } else {
     viewport = message;
   }

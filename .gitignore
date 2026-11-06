@@ -14,6 +14,7 @@ release/
 .tools/
 tauri-v2/node_modules/
 tauri-v2/dist/
+tauri-v2/.test-build/
 tauri-v2/src-tauri/target/
 tauri-v2/src-tauri/gen/
 tauri-v2/public/fixtures/300-pages.pdf

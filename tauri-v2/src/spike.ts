@@ -1,12 +1,15 @@
-import { drawStroke, strokeBounds, strokeVisible, type Sample, type Stroke } from './rendering';
+import { drawStroke, relativeCameraTransform, strokeBounds, strokeVisible, type Sample, type Stroke } from './rendering';
 
 type Tool = 'pen' | 'highlighter' | 'eraser' | 'hand';
 type Gesture = { id: number; kind: 'ink' | 'erase' | 'pan'; lastX: number; lastY: number };
+type Camera = { x: number; y: number; scale: number };
 
 const surface = document.querySelector<HTMLDivElement>('#surface')!;
 const canvas = document.querySelector<HTMLCanvasElement>('#ink')!;
+const sceneCanvas = document.querySelector<HTMLCanvasElement>('#scene-ink')!;
 const workerCanvas = document.querySelector<HTMLCanvasElement>('#worker-ink')!;
 const context = canvas.getContext('2d', { alpha: true })!;
+const sceneContext = sceneCanvas.getContext('2d', { alpha: true })!;
 const hint = document.querySelector<HTMLDivElement>('.canvas-hint')!;
 const widthInput = document.querySelector<HTMLInputElement>('#width')!;
 const palmInput = document.querySelector<HTMLInputElement>('#palm')!;
@@ -34,11 +37,14 @@ let spaceHeld = false;
 let gesture: Gesture | null = null;
 let liveStroke: Stroke | null = null;
 let strokes: Stroke[] = [];
-let camera = { x: 0, y: 0, scale: 1 };
+let camera: Camera = { x: 0, y: 0, scale: 1 };
+let sceneCamera: Camera = { ...camera };
+let workerCamera: Camera = { ...camera };
+let viewportCommitTimer: number | null = null;
 let deviceScale = window.devicePixelRatio || 1;
 let renderRequested = false;
+let sceneDirty = true;
 let lastFrame = 0;
-let penLastSeen = -Infinity;
 let coalescedCount = 0;
 let eventTimes: number[] = [];
 let pendingSamples: number[] = [];
@@ -51,30 +57,56 @@ let pdfMounted = false;
 let lastPointer = 'Waiting for pointer input';
 
 function syncWorkerScene() {
+  sceneDirty = true;
   if (worker && rendererInput.value === 'worker') worker.postMessage({ type: 'scene', strokes });
 }
 
 function syncWorkerViewport() {
+  sceneDirty = true;
   if (worker && rendererInput.value === 'worker') {
     worker.postMessage({ type: 'viewport', width: surface.clientWidth, height: surface.clientHeight,
       dpr: deviceScale, camera, culling: cullingInput.checked });
   }
 }
 
+function applySceneTransform() {
+  const useWorker = rendererInput.value === 'worker';
+  const layer = useWorker ? workerCanvas : sceneCanvas;
+  const base = useWorker ? workerCamera : sceneCamera;
+  const transform = relativeCameraTransform(camera, base);
+  layer.style.transform = `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`;
+}
+
+function commitViewport() {
+  if (viewportCommitTimer !== null) window.clearTimeout(viewportCommitTimer);
+  viewportCommitTimer = null;
+  syncWorkerViewport();
+  requestRender();
+}
+
+function scheduleViewportCommit() {
+  if (viewportCommitTimer !== null) window.clearTimeout(viewportCommitTimer);
+  viewportCommitTimer = window.setTimeout(commitViewport, 100);
+}
+
 function startWorker() {
   if (!worker) {
     try {
       worker = new Worker(new URL('./render-worker.ts', import.meta.url), { type: 'module' });
-      worker.onmessage = (event: MessageEvent<{ type: string; ms: number }>) => {
+      worker.onmessage = (event: MessageEvent<{ type: string; ms: number; camera: Camera }>) => {
         if (event.data.type === 'draw-time') {
           workerDrawTimes.push(event.data.ms);
           if (workerDrawTimes.length > 180) workerDrawTimes.shift();
+          workerCamera = event.data.camera;
+          applySceneTransform();
         }
       };
       worker.onerror = () => {
         rendererInput.value = 'main';
         rendererInput.querySelector<HTMLOptionElement>('[value="worker"]')!.disabled = true;
         workerCanvas.style.display = 'none';
+        sceneCanvas.style.display = 'block';
+        sceneDirty = true;
         workerNote.textContent = 'Worker failed in this runtime; using main-thread drawing.';
         worker?.terminate(); worker = null;
         requestRender();
@@ -85,12 +117,15 @@ function startWorker() {
       rendererInput.value = 'main';
       rendererInput.querySelector<HTMLOptionElement>('[value="worker"]')!.disabled = true;
       workerCanvas.style.display = 'none';
+      sceneCanvas.style.display = 'block';
+      sceneDirty = true;
       workerNote.textContent = 'Offscreen worker is unavailable in this runtime.';
       worker?.terminate(); worker = null;
       return;
     }
   }
   workerCanvas.style.display = 'block';
+  sceneCanvas.style.display = 'none';
   syncWorkerScene();
   syncWorkerViewport();
 }
@@ -122,6 +157,19 @@ function updateCounts() {
   hint.classList.toggle('hidden', strokes.length > 0 || liveStroke !== null);
 }
 
+function renderCompletedInk() {
+  if (!sceneDirty || rendererInput.value !== 'main') return;
+  sceneDirty = false;
+  sceneContext.setTransform(1, 0, 0, 1, 0, 0);
+  sceneContext.clearRect(0, 0, sceneCanvas.width, sceneCanvas.height);
+  sceneContext.setTransform(deviceScale * camera.scale, 0, 0, deviceScale * camera.scale, deviceScale * camera.x, deviceScale * camera.y);
+  for (const stroke of strokes) {
+    if (strokeVisible(stroke, camera, surface.clientWidth, surface.clientHeight, cullingInput.checked)) drawStroke(sceneContext, stroke);
+  }
+  sceneCamera = { ...camera };
+  sceneCanvas.style.transform = '';
+}
+
 function render(frameTime: number) {
   renderRequested = false;
   if (lastFrame && gesture) {
@@ -137,19 +185,17 @@ function render(frameTime: number) {
   if (delays.length > 180) delays = delays.slice(-180);
 
   const drawStart = performance.now();
+  renderCompletedInk();
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.setTransform(deviceScale * camera.scale, 0, 0, deviceScale * camera.scale, deviceScale * camera.x, deviceScale * camera.y);
-  if (rendererInput.value === 'main') {
-    for (const stroke of strokes) {
-      if (strokeVisible(stroke, camera, surface.clientWidth, surface.clientHeight, cullingInput.checked)) drawStroke(context, stroke);
-    }
-  }
   if (liveStroke) drawStroke(context, liveStroke);
-  drawTimes.push(performance.now() - drawStart);
-  if (drawTimes.length > 180) drawTimes.shift();
+  if (gesture) {
+    drawTimes.push(performance.now() - drawStart);
+    if (drawTimes.length > 180) drawTimes.shift();
+  }
 
-  if (gesture) requestRender();
+  if (gesture?.kind === 'ink') requestRender();
 }
 
 function requestRender() {
@@ -159,10 +205,15 @@ function requestRender() {
 }
 
 function resizeCanvas() {
+  if (viewportCommitTimer !== null) window.clearTimeout(viewportCommitTimer);
+  viewportCommitTimer = null;
   const rect = surface.getBoundingClientRect();
   deviceScale = window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.round(rect.width * deviceScale));
   canvas.height = Math.max(1, Math.round(rect.height * deviceScale));
+  sceneCanvas.width = canvas.width;
+  sceneCanvas.height = canvas.height;
+  sceneDirty = true;
   syncWorkerViewport();
   requestRender();
 }
@@ -227,8 +278,7 @@ function recordInput(event: PointerEvent, samples: PointerEvent[]) {
 }
 
 function isRejected(event: PointerEvent) {
-  if (event.pointerType === 'pen') penLastSeen = performance.now();
-  if (event.pointerType === 'touch' && palmInput.checked && performance.now() - penLastSeen < 700) return true;
+  if (event.pointerType === 'touch' && palmInput.checked && tool !== 'hand' && !spaceHeld) return true;
   return penOnlyInput.checked && event.pointerType !== 'pen' && !spaceHeld && tool !== 'hand';
 }
 
@@ -240,13 +290,17 @@ function onPointerDown(event: PointerEvent) {
   const position = screenPosition(event);
   const mode: Gesture['kind'] = spaceHeld || tool === 'hand' || event.button === 1 ? 'pan'
     : tool === 'eraser' || eraserDown(event) ? 'erase' : 'ink';
+  if (mode === 'pan' && viewportCommitTimer !== null) {
+    window.clearTimeout(viewportCommitTimer);
+    viewportCommitTimer = null;
+  }
   gesture = { id: event.pointerId, kind: mode, lastX: position.x, lastY: position.y };
   lastFrame = 0;
   lastPointer = `${event.pointerType} · ${mode}`;
   value('#pointer-state', lastPointer);
   value('#frame-source', streamInput.value === 'raw' ? 'raw updates' : 'coalesced moves');
   if (mode === 'ink') {
-    liveStroke = { tool: tool === 'highlighter' ? 'highlighter' : 'pen', color, width: thickness, points: [makeSample(event)] };
+    liveStroke = { tool: tool === 'highlighter' ? 'highlighter' : 'pen', color, width: thickness, completed: false, points: [makeSample(event)] };
     recordInput(event, [event]);
     updateCounts();
   } else if (mode === 'erase') {
@@ -258,7 +312,6 @@ function onPointerDown(event: PointerEvent) {
 }
 
 function handlePointerMotion(event: PointerEvent) {
-  if (event.pointerType === 'pen') penLastSeen = performance.now();
   if (!gesture || event.pointerId !== gesture.id) return;
   const position = screenPosition(event);
   if (gesture.kind === 'pan') {
@@ -266,8 +319,7 @@ function handlePointerMotion(event: PointerEvent) {
     camera.y += position.y - gesture.lastY;
     gesture.lastX = position.x;
     gesture.lastY = position.y;
-    syncWorkerViewport();
-    requestRender();
+    applySceneTransform();
     return;
   }
   const samples = streamInput.value === 'move' && typeof event.getCoalescedEvents === 'function'
@@ -284,11 +336,16 @@ function handlePointerMotion(event: PointerEvent) {
 
 function finishGesture(event?: PointerEvent) {
   if (!gesture || (event && event.pointerId !== gesture.id)) return;
+  if (gesture.kind === 'pan') {
+    commitViewport();
+  }
   if (liveStroke) {
+    liveStroke.completed = true;
     liveStroke.bounds = strokeBounds(liveStroke);
     strokes.push(liveStroke);
+    sceneDirty = true;
+    if (worker && rendererInput.value === 'worker') worker.postMessage({ type: 'append', stroke: liveStroke });
     liveStroke = null;
-    syncWorkerScene();
   }
   try { surface.releasePointerCapture(gesture.id); } catch { /* capture may already be gone */ }
   gesture = null;
@@ -302,9 +359,9 @@ function zoomAt(factor: number, x: number, y: number) {
   camera.x = x - (x - camera.x) * nextScale / oldScale;
   camera.y = y - (y - camera.y) * nextScale / oldScale;
   camera.scale = nextScale;
-  syncWorkerViewport();
+  applySceneTransform();
+  scheduleViewportCommit();
   value('#zoom-value', `${Math.round(nextScale * 100)}%`);
-  requestRender();
 }
 
 surface.addEventListener('pointerdown', onPointerDown);
@@ -383,7 +440,11 @@ rendererInput.addEventListener('change', () => {
   drawTimes = [];
   workerDrawTimes = [];
   if (rendererInput.value === 'worker') startWorker();
-  else workerCanvas.style.display = 'none';
+  else {
+    workerCanvas.style.display = 'none';
+    sceneCanvas.style.display = 'block';
+    sceneDirty = true;
+  }
   requestRender();
 });
 pdfToggle.addEventListener('click', async () => {
@@ -406,9 +467,9 @@ document.querySelector<HTMLButtonElement>('#zoom-in')!.addEventListener('click',
 document.querySelector<HTMLButtonElement>('#zoom-out')!.addEventListener('click', () => zoomAt(0.8, surface.clientWidth / 2, surface.clientHeight / 2));
 document.querySelector<HTMLButtonElement>('#zoom-reset')!.addEventListener('click', () => {
   camera = { x: 0, y: 0, scale: 1 };
-  syncWorkerViewport();
+  applySceneTransform();
+  scheduleViewportCommit();
   value('#zoom-value', '100%');
-  requestRender();
 });
 streamInput.addEventListener('change', () => {
   finishGesture();
