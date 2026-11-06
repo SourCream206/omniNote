@@ -64,6 +64,11 @@ fn notebooks_folders_and_pages_have_visible_paths_and_stable_ids() {
     let children = reopened.list_children(Some(folder.id)).unwrap();
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].id, page.id);
+    let all = reopened.list_all_nodes().unwrap();
+    assert_eq!(all.len(), 3);
+    assert!(all.iter().any(|node| node.id == notebook.id && node.parent_id.is_none()));
+    assert!(all.iter().any(|node| node.id == folder.id && node.parent_id == Some(notebook.id)));
+    assert!(all.iter().any(|node| node.id == page.id && node.parent_id == Some(folder.id)));
 }
 
 #[test]
@@ -283,4 +288,29 @@ fn backup_contains_database_and_originals_but_not_temporary_files() {
     use std::io::Read;
     archive.by_name(&asset.relative_path).unwrap().read_to_string(&mut original).unwrap();
     assert_eq!(original, "original PDF");
+}
+
+#[test]
+fn installed_extension_requires_explicit_enable_and_declared_permissions() {
+    let temp = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = temp.path().join("Workspace");
+    let workspace = Workspace::create(&root).unwrap();
+    let id = "omninote.example";
+    let manifest = serde_json::json!({
+        "id": id, "name": "Example", "version": "1.0.0", "apiVersion": "1.0.0",
+        "main": "extension.js", "permissions": ["canvas.write"],
+        "contributes": {"commands": [], "settings": [{"key":"label", "type":"string", "default":"Date"}]}
+    });
+    workspace.install_extension(id, &[
+        ("extension.json".into(), manifest.to_string().into_bytes()),
+        ("extension.js".into(), b"self.onmessage=()=>{}".to_vec()),
+    ]).unwrap();
+    assert!(!workspace.list_extensions().unwrap()[0]["enabled"].as_bool().unwrap());
+    assert!(workspace.extension_source(id).is_err());
+    assert!(workspace.set_extension_enabled(id, true, &["asset.read".into()]).is_err());
+    workspace.set_extension_enabled(id, true, &["canvas.write".into()]).unwrap();
+    workspace.set_extension_setting(id, "label", &serde_json::json!("Today")).unwrap();
+    assert_eq!(workspace.extension_source(id).unwrap(), "self.onmessage=()=>{}");
+    assert_eq!(workspace.list_extensions().unwrap()[0]["settings"]["label"], "Today");
+    assert!(workspace.install_extension("../escape", &[]).is_err());
 }

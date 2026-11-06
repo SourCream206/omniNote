@@ -17,6 +17,10 @@ async function pngFromImage(image: Image): Promise<Uint8Array> {
   return new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
 }
 
+async function readAsset(assetId: string): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>('read_asset', { assetId }));
+}
+
 export function createTauriBridge(): WhiteboardBridge {
   const appWindow = getCurrentWindow();
   return {
@@ -48,8 +52,8 @@ export function createTauriBridge(): WhiteboardBridge {
     checkForUpdates: async () => updateStatus,
     promptToInstallUpdate: async () => updateStatus,
     onUpdateStatus: () => () => {},
-    listExtensions: async () => [],
-    searchMarketplace: async () => ({ configured: false, entries: [] }),
+    listExtensions: () => invoke('list_extensions'),
+    searchMarketplace: (query: string) => invoke('search_marketplace', { query }),
     openWorkspaceFolder: () => invoke('open_workspace_folder'),
     revealNode: (nodeId: string) => invoke('reveal_node', { nodeId }),
     createDocumentPage: (sectionId: string, assetId: string) => invoke('create_document_page', { sectionId, assetId }),
@@ -57,12 +61,12 @@ export function createTauriBridge(): WhiteboardBridge {
     setFolderAppearance: (nodeId: string, icon, color: string) => invoke('set_folder_appearance', { nodeId, icon, color }),
     deleteNode: (nodeId: string) => invoke('delete_node', { nodeId }),
     moveNode: (nodeId: string, parentId: string | null, beforeId?: string | null) => invoke('move_node', { nodeId, parentId, beforeId: beforeId ?? null }),
-    importAsset: (name: string, mimeType: string, bytes: Uint8Array) => invoke('import_asset', { name, mimeType, bytes: Array.from(bytes) }),
+    importAsset: (name: string, mimeType: string, bytes: Uint8Array) => invoke('import_asset_raw', bytes, { headers: { 'x-file-name': encodeURIComponent(name), 'x-mime-type': mimeType || 'application/octet-stream' } }),
     pickAssets: () => invoke('pick_assets'),
-    readAsset: async (assetId: string) => new Uint8Array(await invoke<number[]>('read_asset', { assetId })),
+    readAsset,
     copyImage: async (assetId: string) => {
-      const bytes = new Uint8Array(await invoke<number[]>('read_asset', { assetId }));
-      const bitmap = await createImageBitmap(new Blob([bytes]));
+      const bytes = await readAsset(assetId);
+      const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)]));
       try {
         const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
         const context = canvas.getContext('2d');
@@ -86,12 +90,12 @@ export function createTauriBridge(): WhiteboardBridge {
     },
     openOriginal: (assetId: string) => invoke('open_original', { assetId }),
     openExternal: (address: string) => invoke('open_external', { address }),
-    installMarketplaceExtension: () => unavailable('Extension installation'),
-    extensionSource: () => unavailable('Extensions'),
-    extensionResource: () => unavailable('Extensions'),
-    enableExtension: () => unavailable('Extensions'),
-    setExtensionSetting: () => unavailable('Extensions'),
-    saveExtensionExport: () => unavailable('Extension export'),
+    installMarketplaceExtension: (extensionId: string, version: string) => invoke('install_marketplace_extension', { extensionId, version }),
+    extensionSource: (extensionId: string) => invoke('extension_source', { extensionId }),
+    extensionResource: (extensionId: string, fileName: string) => invoke('extension_resource', { extensionId, fileName }),
+    enableExtension: (extensionId: string, enabled: boolean, permissions: string[] = []) => invoke('enable_extension', { extensionId, enabled, permissions }),
+    setExtensionSetting: (extensionId: string, key: string, value: boolean | string) => invoke('set_extension_setting', { extensionId, key, value }),
+    saveExtensionExport: (name: string, bytes: Uint8Array) => invoke('save_extension_export', { name, bytes: Array.from(bytes) }),
     exportWorkspace: () => invoke('export_workspace'),
     exportPagePdf: () => unavailable('PDF export'),
   };

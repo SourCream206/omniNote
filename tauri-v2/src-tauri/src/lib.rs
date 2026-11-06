@@ -1,13 +1,15 @@
 //! Tauri shell for the existing omniNote workspace UI.
 
-use omninote_workspace_core::{Node, NodeKind, Workspace};
+use omninote_workspace_core::Workspace;
 use serde_json::{json, Value};
 use std::fs;
 use std::sync::Mutex;
+use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
+mod marketplace;
 
 struct WorkspaceState(Mutex<Workspace>);
 
@@ -15,21 +17,10 @@ fn parse_id(id: &str) -> Result<Uuid, String> {
     Uuid::parse_str(id).map_err(|_| "Invalid node ID".to_owned())
 }
 
-fn collect_nodes(workspace: &Workspace, parent: Option<Uuid>, output: &mut Vec<Node>) -> Result<(), String> {
-    for node in workspace.list_children(parent).map_err(|error| error.to_string())? {
-        let child_parent = node.id;
-        let expandable = node.kind != NodeKind::Page;
-        output.push(node);
-        if expandable { collect_nodes(workspace, Some(child_parent), output)?; }
-    }
-    Ok(())
-}
-
 #[tauri::command]
 fn load_workspace(state: State<'_, WorkspaceState>) -> Result<Value, String> {
     let workspace = state.0.lock().map_err(|_| "Workspace lock failed")?;
-    let mut all_nodes = Vec::new();
-    collect_nodes(&workspace, None, &mut all_nodes)?;
+    let all_nodes = workspace.list_all_nodes().map_err(|error| error.to_string())?;
     let nodes: Vec<_> = all_nodes.iter().map(|node| json!({
         "id": node.id, "parent_id": node.parent_id, "kind": node.kind,
         "title": node.title, "order_index": node.sort_order,
@@ -98,15 +89,22 @@ fn move_node(state: State<'_, WorkspaceState>, node_id: String, parent_id: Optio
 }
 
 #[tauri::command]
-fn import_asset(state: State<'_, WorkspaceState>, name: String, mime_type: String, bytes: Vec<u8>) -> Result<omninote_workspace_core::Asset, String> {
+fn import_asset_raw(state: State<'_, WorkspaceState>, request: Request<'_>) -> Result<omninote_workspace_core::Asset, String> {
+    let InvokeBody::Raw(bytes) = request.body() else { return Err("Expected file bytes".to_owned()) };
+    if bytes.is_empty() || bytes.len() > 512 * 1024 * 1024 { return Err("File size is unsupported".to_owned()); }
+    let encoded_name = request.headers().get("x-file-name").and_then(|header| header.to_str().ok()).ok_or("Missing file name")?;
+    let name = url::form_urlencoded::parse(format!("name={encoded_name}").as_bytes())
+        .find(|(key, _)| key == "name").map(|(_, value)| value.into_owned()).ok_or("Invalid file name")?;
+    let mime_type = request.headers().get("x-mime-type").and_then(|header| header.to_str().ok()).unwrap_or("application/octet-stream");
     state.0.lock().map_err(|_| "Workspace lock failed")?
-        .import_asset(&name, &mime_type, &bytes).map_err(|error| error.to_string())
+        .import_asset(&name, mime_type, bytes).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn read_asset(state: State<'_, WorkspaceState>, asset_id: String) -> Result<Vec<u8>, String> {
-    state.0.lock().map_err(|_| "Workspace lock failed")?
-        .read_asset(parse_id(&asset_id)?).map_err(|error| error.to_string())
+fn read_asset(state: State<'_, WorkspaceState>, asset_id: String) -> Result<Response, String> {
+    let bytes = state.0.lock().map_err(|_| "Workspace lock failed")?
+        .read_asset(parse_id(&asset_id)?).map_err(|error| error.to_string())?;
+    Ok(Response::new(bytes))
 }
 
 #[tauri::command]
@@ -129,6 +127,59 @@ fn export_workspace(app: tauri::AppHandle, state: State<'_, WorkspaceState>) -> 
     let path = selected.as_path().ok_or("This destination is not supported on this platform yet")?;
     state.0.lock().map_err(|_| "Workspace lock failed")?
         .export_archive(path).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn list_extensions(state: State<'_, WorkspaceState>) -> Result<Value, String> {
+    let workspace = state.0.lock().map_err(|_| "Workspace lock failed")?;
+    Ok(json!(workspace.list_extensions().map_err(|error| error.to_string())?))
+}
+
+#[tauri::command]
+async fn search_marketplace(query: String) -> Result<Value, String> {
+    marketplace::search(&query).await
+}
+
+#[tauri::command]
+async fn install_marketplace_extension(app: tauri::AppHandle, extension_id: String, version: String) -> Result<Value, String> {
+    let files = marketplace::download(&extension_id, &version).await?;
+    app.state::<WorkspaceState>().0.lock().map_err(|_| "Workspace lock failed")?
+        .install_extension(&extension_id, &files).map_err(|error| error.to_string())?;
+    Ok(json!({ "id": extension_id, "version": version }))
+}
+
+#[tauri::command]
+fn extension_source(state: State<'_, WorkspaceState>, extension_id: String) -> Result<String, String> {
+    state.0.lock().map_err(|_| "Workspace lock failed")?
+        .extension_source(&extension_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn extension_resource(state: State<'_, WorkspaceState>, extension_id: String, file_name: String) -> Result<String, String> {
+    state.0.lock().map_err(|_| "Workspace lock failed")?
+        .extension_resource(&extension_id, &file_name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn enable_extension(state: State<'_, WorkspaceState>, extension_id: String, enabled: bool, permissions: Vec<String>) -> Result<(), String> {
+    state.0.lock().map_err(|_| "Workspace lock failed")?
+        .set_extension_enabled(&extension_id, enabled, &permissions).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_extension_setting(state: State<'_, WorkspaceState>, extension_id: String, key: String, value: Value) -> Result<(), String> {
+    state.0.lock().map_err(|_| "Workspace lock failed")?
+        .set_extension_setting(&extension_id, &key, &value).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_extension_export(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<bool, String> {
+    if name.is_empty() || name.len() > 120 || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || bytes.is_empty() || bytes.len() > 100 * 1024 * 1024 { return Err("Invalid extension export".into()); }
+    let Some(selected) = app.dialog().file().set_file_name(&name).blocking_save_file() else { return Ok(false) };
+    let path = selected.as_path().ok_or("This destination is not supported on this platform yet")?;
+    fs::write(path, bytes).map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -186,6 +237,7 @@ fn camera_values(camera: &Value) -> Result<(f64, f64, f64), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -203,7 +255,7 @@ pub fn run() {
             app.manage(WorkspaceState(Mutex::new(workspace)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset, read_asset, pick_assets, export_workspace, open_workspace_folder, reveal_node, open_original, open_external])
+        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external])
         .run(tauri::generate_context!())
         .expect("failed to run omniNote");
 }

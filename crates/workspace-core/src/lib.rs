@@ -10,6 +10,8 @@ use thiserror::Error;
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
+mod extensions;
+pub use extensions::{valid_extension_file, valid_extension_id};
 
 pub const WORKSPACE_VERSION: u32 = 2;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -34,6 +36,8 @@ pub enum WorkspaceError {
     InvalidParent,
     #[error("node path escapes the workspace")]
     UnsafePath,
+    #[error("extension package or permission is invalid")]
+    InvalidExtension,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -174,6 +178,8 @@ impl Workspace {
                page_id TEXT PRIMARY KEY REFERENCES page_state(id) ON DELETE CASCADE,
                asset_id TEXT NOT NULL REFERENCES assets(id)
              );
+             CREATE TABLE extension_state (extension_id TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, PRIMARY KEY(extension_id, key));
+             CREATE TABLE extension_grants (extension_id TEXT NOT NULL, permission TEXT NOT NULL, PRIMARY KEY(extension_id, permission));
              PRAGMA user_version = 2;",
         )?;
         connection.execute(
@@ -267,6 +273,7 @@ impl Workspace {
         }
         fs::create_dir_all(root.join("assets"))?;
         fs::create_dir_all(root.join(".trash"))?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS extension_state (extension_id TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, PRIMARY KEY(extension_id, key)); CREATE TABLE IF NOT EXISTS extension_grants (extension_id TEXT NOT NULL, permission TEXT NOT NULL, PRIMARY KEY(extension_id, permission));")?;
         Ok(Self {
             root,
             manifest,
@@ -389,35 +396,15 @@ impl Workspace {
             "SELECT id, parent_id, kind, title, relative_path, sort_order, folder_icon, folder_color
              FROM nodes WHERE parent_id IS ?1 ORDER BY sort_order, id",
         )?;
-        let rows = statement.query_map([parent_id.map(|id| id.to_string())], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, String>(6)?,
-                row.get::<_, String>(7)?,
-            ))
-        })?;
-        rows.map(|row| {
-            let (id, parent, kind, title, relative_path, sort_order, folder_icon, folder_color) = row?;
-            Ok(Node {
-                id: Uuid::parse_str(&id).map_err(|_| WorkspaceError::InvalidManifest)?,
-                parent_id: parent
-                    .map(|id| Uuid::parse_str(&id))
-                    .transpose()
-                    .map_err(|_| WorkspaceError::InvalidManifest)?,
-                kind: NodeKind::parse(&kind)?,
-                title,
-                relative_path,
-                sort_order,
-                folder_icon,
-                folder_color,
-            })
-        })
-        .collect()
+        collect_node_rows(&mut statement, [parent_id.map(|id| id.to_string())])
+    }
+
+    pub fn list_all_nodes(&self) -> Result<Vec<Node>, WorkspaceError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, parent_id, kind, title, relative_path, sort_order, folder_icon, folder_color
+             FROM nodes ORDER BY parent_id, sort_order, id",
+        )?;
+        collect_node_rows(&mut statement, [])
     }
 
     pub fn list_pages(&self) -> Result<Vec<PageState>, WorkspaceError> {
@@ -821,6 +808,25 @@ impl Workspace {
             folder_color: "#89929e".to_owned(),
         })
     }
+}
+
+fn collect_node_rows<P: rusqlite::Params>(statement: &mut rusqlite::Statement<'_>, params: P) -> Result<Vec<Node>, WorkspaceError> {
+    let rows = statement.query_map(params, |row| {
+        Ok((
+            row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?, row.get::<_, i64>(5)?,
+            row.get::<_, String>(6)?, row.get::<_, String>(7)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, parent, kind, title, relative_path, sort_order, folder_icon, folder_color) = row?;
+        Ok(Node {
+            id: Uuid::parse_str(&id).map_err(|_| WorkspaceError::InvalidManifest)?,
+            parent_id: parent.map(|id| Uuid::parse_str(&id)).transpose().map_err(|_| WorkspaceError::InvalidManifest)?,
+            kind: NodeKind::parse(&kind)?, title, relative_path, sort_order, folder_icon, folder_color,
+        })
+    }).collect()
 }
 
 fn validate_camera(x: f64, y: f64, zoom: f64) -> Result<(), WorkspaceError> {
