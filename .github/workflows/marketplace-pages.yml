@@ -6,8 +6,10 @@ on:
     paths:
       - '.github/workflows/marketplace-pages.yml'
       - 'examples/contributions/**'
+      - 'examples/date-insert/**'
       - 'scripts/build-marketplace-example.cjs'
       - 'marketplace/index.html'
+      - 'marketplace/extensions/index.html'
       - 'package-lock.json'
   workflow_dispatch:
 

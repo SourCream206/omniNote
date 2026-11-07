@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="Browse extensions available for omniNote.">
+  <title>omniNote — Extensions</title>
+  <style>
+    :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1d1d1f; background: #fff; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; }
+    a { color: inherit; }
+    ::selection { color: #fff; background: #333; }
+    .shell { width: min(100% - 48px, 840px); margin: 0 auto; }
+    header { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #e5e5e7; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-size: 16px; font-weight: 700; letter-spacing: -.025em; white-space: nowrap; }
+    .header-links { display: flex; gap: 20px; }
+    .header-links a, .minor-link { color: #55555a; font-size: 13px; text-decoration: none; }
+    .header-links a:hover, .minor-link:hover { color: #1d1d1f; text-decoration: underline; text-underline-offset: 3px; }
+    main { max-width: 710px; padding: clamp(64px, 9vw, 96px) 0 80px; }
+    h1 { margin: 0; font-size: clamp(38px, 6vw, 52px); line-height: 1.12; font-weight: 650; letter-spacing: -.035em; }
+    .intro { max-width: 580px; margin: 15px 0 36px; color: #55555a; font-size: 17px; line-height: 1.55; }
+    .search { display: block; width: 100%; height: 46px; padding: 0 14px; border: 1px solid #c9c9ce; border-radius: 6px; background: #fff; color: #1d1d1f; font: inherit; font-size: 14px; }
+    .search::placeholder { color: #6e6e73; }
+    :focus-visible { outline: 2px solid #1d1d1f; outline-offset: 3px; }
+    .status { margin: 26px 0 0; color: #55555a; font-size: 14px; }
+    .list { margin-top: 24px; border-top: 1px solid #e5e5e7; }
+    .extension { padding: 24px 0; border-bottom: 1px solid #e5e5e7; }
+    .extension-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+    .extension h2 { margin: 0; font-size: 18px; font-weight: 650; }
+    .version { color: #6e6e73; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .extension p { margin: 9px 0 0; color: #55555a; font-size: 14px; line-height: 1.5; }
+    .permission { font-size: 12px !important; }
+    .foot { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 25px; }
+    @media (max-width: 560px) { .shell { width: min(100% - 36px, 840px); } .header-links { gap: 12px; } .intro { font-size: 16px; } main { padding-bottom: 64px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <a class="brand" href="../" aria-label="omniNote home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4.5h6.2c1.1 0 2.1.35 2.8 1.1.7-.75 1.7-1.1 2.8-1.1H20v15h-4.2c-1.1 0-2.1.35-2.8 1.1-.7-.75-1.7-1.1-2.8-1.1H4v-15Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 5.6v14" stroke="currentColor" stroke-width="1.7"/></svg>omniNote</a>
+      <nav class="header-links" aria-label="Site"><a href="../">Download</a><a href="https://github.com/SourCream206/omniNote">GitHub ↗</a></nav>
+    </header>
+    <main>
+      <h1>Extensions</h1>
+      <p class="intro">Find an extension here, then search its name in omniNote’s Extensions sidebar to install it.</p>
+      <input id="search" class="search" type="search" aria-label="Search extensions" placeholder="Search extensions" autocomplete="off">
+      <p id="status" class="status" role="status">Loading extensions…</p>
+      <div id="list" class="list" aria-live="polite"></div>
+      <div class="foot"><a class="minor-link" href="https://github.com/SourCream206/omniNote/blob/main/docs/EXTENSIONS.md">Extension guide ↗</a></div>
+    </main>
+  </div>
+  <script>
+    const search = document.getElementById('search');
+    const list = document.getElementById('list');
+    const status = document.getElementById('status');
+    let entries = [];
+    function render() {
+      const query = search.value.trim().toLowerCase();
+      const visible = entries.filter((item) => `${item.name} ${item.summary} ${item.id}`.toLowerCase().includes(query));
+      list.replaceChildren();
+      for (const item of visible) {
+        const row = document.createElement('article');
+        row.className = 'extension';
+        const head = document.createElement('div');
+        head.className = 'extension-head';
+        const name = document.createElement('h2');
+        name.textContent = item.name;
+        const version = document.createElement('span');
+        version.className = 'version';
+        version.textContent = `v${item.version}`;
+        const summary = document.createElement('p');
+        summary.textContent = item.summary;
+        const permissions = document.createElement('p');
+        permissions.className = 'permission';
+        permissions.textContent = `Permissions: ${item.permissions.length ? item.permissions.join(', ') : 'None'}`;
+        head.append(name, version);
+        row.append(head, summary, permissions);
+        list.append(row);
+      }
+      status.textContent = visible.length ? `${visible.length} extension${visible.length === 1 ? '' : 's'}` : 'No matching extensions.';
+    }
+    search.addEventListener('input', render);
+    fetch('../catalog.json', { cache: 'no-store' })
+      .then((response) => { if (!response.ok) throw new Error('Catalog unavailable'); return response.json(); })
+      .then((catalog) => {
+        entries = Array.isArray(catalog.extensions) ? catalog.extensions.filter((item) =>
+          typeof item.id === 'string' && typeof item.name === 'string' && typeof item.summary === 'string' &&
+          typeof item.version === 'string' && Array.isArray(item.permissions)) : [];
+        render();
+      })
+      .catch(() => { status.textContent = 'Extensions are unavailable right now. Try again later.'; });
+  </script>
+</body>
+</html>

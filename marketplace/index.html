@@ -17,6 +17,7 @@
     header { min-height: 72px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e5e5e7; }
     .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-size: 16px; font-weight: 700; letter-spacing: -.025em; }
     .brand svg { color: #1d1d1f; }
+    .header-links { display: flex; gap: 20px; }
     .header-link, .minor-link { color: #55555a; font-size: 13px; text-decoration: none; }
     .header-link:hover, .minor-link:hover { color: #1d1d1f; text-decoration: underline; text-underline-offset: 3px; }
     main { max-width: 710px; padding: clamp(64px, 9vw, 96px) 0 80px; }
@@ -35,25 +36,25 @@
     .linux-links a { color: #1d1d1f; font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
     .linux-links a:hover { color: #55555a; }
     .release-links { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 19px; }
-    @media (max-width: 560px) { .shell { width: min(100% - 36px, 840px); } .download-row { align-items: flex-start; flex-direction: column; gap: 18px; } .download { width: 100%; } .linux-links { justify-content: flex-start; } .intro { font-size: 16px; } main { padding-bottom: 64px; } }
+    @media (max-width: 560px) { .shell { width: min(100% - 36px, 840px); } .header-links { gap: 12px; } .download-row { align-items: flex-start; flex-direction: column; gap: 18px; } .download { width: 100%; } .linux-links { justify-content: flex-start; } .intro { font-size: 16px; } main { padding-bottom: 64px; } }
   </style>
 </head>
 <body>
   <div class="shell">
     <header>
       <a class="brand" href="./" aria-label="omniNote home"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4.5h6.2c1.1 0 2.1.35 2.8 1.1.7-.75 1.7-1.1 2.8-1.1H20v15h-4.2c-1.1 0-2.1.35-2.8 1.1-.7-.75-1.7-1.1-2.8-1.1H4v-15Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 5.6v14" stroke="currentColor" stroke-width="1.7"/></svg>omniNote</a>
-      <a class="header-link" href="https://github.com/SourCream206/omniNote">View on GitHub ↗</a>
+      <nav class="header-links" aria-label="Site"><a class="header-link" href="extensions/">Extensions</a><a class="header-link" href="https://github.com/SourCream206/omniNote">GitHub ↗</a></nav>
     </header>
     <main>
       <h1>Download omniNote</h1>
       <p class="intro">A local notebook for text, documents, and handwriting on an infinite canvas.</p>
       <section class="downloads" aria-label="Installers">
         <div class="download-row">
-          <div><h2>Windows installer</h2><p id="version-label">Version __VERSION__ · .exe</p></div>
-          <a id="download-link" class="download" href="https://github.com/SourCream206/omniNote/releases/download/v__VERSION__/omniNote-Setup-__VERSION__.exe"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 18v3h16v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Download for Windows</a>
+          <div><h2>Windows installer</h2><p id="version-label">Checking latest release…</p></div>
+          <a id="download-link" class="download" href="https://github.com/SourCream206/omniNote/releases/latest"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 18v3h16v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="download-label">View Windows download</span></a>
         </div>
         <div class="download-row" id="linux-row" hidden>
-          <div><h2>Linux</h2><p id="linux-version">Version __VERSION__ · x86_64</p></div>
+          <div><h2>Linux</h2><p id="linux-version">x86_64</p></div>
           <div class="linux-links">
             <a id="linux-deb" href="#" hidden aria-label="Download for Ubuntu or Debian">Ubuntu / Debian</a>
             <a id="linux-rpm" href="#" hidden aria-label="Download for Fedora or openSUSE">Fedora / openSUSE</a>
@@ -69,17 +70,22 @@
     fetch('https://api.github.com/repos/SourCream206/omniNote/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
       .then((response) => { if (!response.ok) throw new Error('Release lookup failed'); return response.json(); })
       .then((release) => {
-        const installer = release.assets?.find((asset) => /^omniNote-Setup-\d+\.\d+\.\d+\.exe$/.test(asset.name));
-        if (!installer || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) return;
-        document.getElementById('download-link').href = installer.browser_download_url;
-        document.getElementById('version-label').textContent = `Version ${release.tag_name.slice(1)} · .exe`;
+        if (!/^v\d+\.\d+\.\d+$/.test(release.tag_name) || !Array.isArray(release.assets)) return;
+        const version = release.tag_name.slice(1);
+        const installer = release.assets.find((asset) =>
+          (/^omniNote-Setup-\d+\.\d+\.\d+\.exe$/.test(asset.name) || /^omniNote_\d+\.\d+\.\d+_x64-setup\.exe$/.test(asset.name)) && asset.name.includes(version));
+        if (installer) {
+          document.getElementById('download-link').href = installer.browser_download_url;
+          document.getElementById('download-label').textContent = 'Download for Windows';
+          document.getElementById('version-label').textContent = `Version ${version} · .exe`;
+        }
         const linuxAssets = [
           ['linux-deb', /\.deb$/], ['linux-rpm', /\.rpm$/],
           ['linux-arch', /\.(?:pacman|pkg\.tar\.zst)$/], ['linux-portable', /\.AppImage$/],
         ];
         let hasLinux = false;
         for (const [id, extension] of linuxAssets) {
-          const asset = release.assets.find((item) => item.name.startsWith(`omniNote-${release.tag_name.slice(1)}-linux-`) && extension.test(item.name));
+          const asset = release.assets.find((item) => item.name.startsWith('omniNote') && item.name.includes(version) && extension.test(item.name));
           if (!asset) continue;
           const link = document.getElementById(id);
           link.href = asset.browser_download_url;
@@ -87,11 +93,11 @@
           hasLinux = true;
         }
         if (hasLinux) {
-          document.getElementById('linux-version').textContent = `Version ${release.tag_name.slice(1)} · x86_64`;
+          document.getElementById('linux-version').textContent = `Version ${version} · x86_64`;
           document.getElementById('linux-row').hidden = false;
         }
       })
-      .catch(() => {});
+      .catch(() => { document.getElementById('version-label').textContent = 'See the latest release on GitHub'; });
   </script>
 </body>
 </html>
