@@ -24,3 +24,6 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+tauri-plugin-updater = "2"

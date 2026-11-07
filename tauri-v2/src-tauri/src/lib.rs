@@ -10,6 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 mod marketplace;
+mod updates;
 
 struct WorkspaceState(Mutex<Workspace>);
 
@@ -243,6 +244,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             let documents = app.path().document_dir()?;
             let parent = documents.join("omniNote").join("workspaces");
             fs::create_dir_all(&parent)?;
@@ -255,7 +258,7 @@ pub fn run() {
             app.manage(WorkspaceState(Mutex::new(workspace)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external])
+        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external, updates::check_for_updates, updates::prompt_to_install_update])
         .run(tauri::generate_context!())
         .expect("failed to run omniNote");
 }

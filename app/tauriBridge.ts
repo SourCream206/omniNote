@@ -5,7 +5,6 @@ import { readImage, readText, writeImage, writeText } from '@tauri-apps/plugin-c
 import type { WhiteboardBridge, Camera, CanvasObject, NodeKind, PaperStyle, Snapshot, UpdateStatus } from './types';
 
 const unavailable = (feature: string): Promise<never> => Promise.reject(new Error(`${feature} is not available in the Tauri preview yet.`));
-const updateStatus: UpdateStatus = { state: 'unavailable', message: 'Updates are not configured in the Tauri preview.' };
 const pendingSaves = new Map<string, Promise<void>>();
 
 function saveInOrder(pageId: string, write: () => Promise<void>): Promise<void> {
@@ -32,6 +31,23 @@ async function readAsset(assetId: string): Promise<Uint8Array> {
 
 export function createTauriBridge(): WhiteboardBridge {
   const appWindow = getCurrentWindow();
+  let updateStatus: UpdateStatus = { state: 'idle', message: 'Checking for updates…' };
+  const updateListeners = new Set<(status: UpdateStatus) => void>();
+  const publishUpdate = (status: UpdateStatus) => {
+    updateStatus = status;
+    updateListeners.forEach((listener) => listener(status));
+    return status;
+  };
+  const checkForUpdates = async (): Promise<UpdateStatus> => {
+    publishUpdate({ state: 'checking', message: 'Checking for updates…' });
+    try {
+      const status = await invoke<UpdateStatus>('check_for_updates', { ignoredVersion: localStorage.getItem('omninote.ignoredUpdate') });
+      if (status.version && status.state === 'available') localStorage.removeItem('omninote.ignoredUpdate');
+      return publishUpdate(status);
+    } catch {
+      return publishUpdate({ state: 'error', message: 'Could not check for updates. Try again later.' });
+    }
+  };
   return {
     load: () => invoke<Snapshot>('load_workspace'),
     createNode: (parentId: string | null, kind: NodeKind, title: string) => invoke('create_node', { parentId, kind, title }),
@@ -57,10 +73,23 @@ export function createTauriBridge(): WhiteboardBridge {
       });
       return () => { disposed = true; unlisten?.(); };
     },
-    getUpdateStatus: async () => updateStatus,
-    checkForUpdates: async () => updateStatus,
-    promptToInstallUpdate: async () => updateStatus,
-    onUpdateStatus: () => () => {},
+    getUpdateStatus: checkForUpdates,
+    checkForUpdates,
+    promptToInstallUpdate: async () => {
+      if (updateStatus.state !== 'available' || !updateStatus.version) return updateStatus;
+      const pending: Promise<void>[] = [];
+      window.dispatchEvent(new CustomEvent('omninote:flush-save', { detail: { waitUntil: (save: Promise<void>) => pending.push(save) } }));
+      await Promise.all(pending);
+      try {
+        const status = await invoke<UpdateStatus>('prompt_to_install_update', { version: updateStatus.version });
+        if (status.state === 'ignored' && status.version) localStorage.setItem('omninote.ignoredUpdate', status.version);
+        return publishUpdate(status);
+      } catch (error) {
+        publishUpdate({ state: 'error', message: 'Update installation failed. Check again to retry.' });
+        throw error;
+      }
+    },
+    onUpdateStatus: (listener) => { updateListeners.add(listener); return () => updateListeners.delete(listener); },
     listExtensions: () => invoke('list_extensions'),
     searchMarketplace: (query: string) => invoke('search_marketplace', { query }),
     openWorkspaceFolder: () => invoke('open_workspace_folder'),
