@@ -4,7 +4,6 @@ import { Image } from '@tauri-apps/api/image';
 import { readImage, readText, writeImage, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import type { WhiteboardBridge, Camera, CanvasObject, NodeKind, PaperStyle, Snapshot, UpdateStatus } from './types';
 
-const unavailable = (feature: string): Promise<never> => Promise.reject(new Error(`${feature} is not available in the Tauri preview yet.`));
 const pendingSaves = new Map<string, Promise<void>>();
 
 function saveInOrder(pageId: string, write: () => Promise<void>): Promise<void> {
@@ -31,6 +30,19 @@ async function readAsset(assetId: string): Promise<Uint8Array> {
 
 export function createTauriBridge(): WhiteboardBridge {
   const appWindow = getCurrentWindow();
+  let closing = false;
+  const flushPages = async () => {
+    const pending: Promise<void>[] = [];
+    window.dispatchEvent(new CustomEvent('omninote:flush-save', { detail: { waitUntil: (save: Promise<void>) => pending.push(save) } }));
+    await Promise.all(pending);
+  };
+  void appWindow.onCloseRequested(async (event) => {
+    event.preventDefault();
+    if (closing) return;
+    closing = true;
+    try { await flushPages(); await appWindow.destroy(); }
+    catch (error) { closing = false; window.alert(`Could not save your page. The window remains open.\n\n${String(error)}`); }
+  });
   let updateStatus: UpdateStatus = { state: 'idle', message: 'Checking for updates…' };
   const updateListeners = new Set<(status: UpdateStatus) => void>();
   const publishUpdate = (status: UpdateStatus) => {
@@ -59,9 +71,6 @@ export function createTauriBridge(): WhiteboardBridge {
     windowAction: async (action) => {
       if (action === 'minimize') { await appWindow.minimize(); return false; }
       if (action === 'maximize') { await appWindow.toggleMaximize(); return appWindow.isMaximized(); }
-      const pending: Promise<void>[] = [];
-      window.dispatchEvent(new CustomEvent('omninote:flush-save', { detail: { waitUntil: (save: Promise<void>) => pending.push(save) } }));
-      await Promise.all(pending);
       await appWindow.close();
       return false;
     },
@@ -77,9 +86,7 @@ export function createTauriBridge(): WhiteboardBridge {
     checkForUpdates,
     promptToInstallUpdate: async () => {
       if (updateStatus.state !== 'available' || !updateStatus.version) return updateStatus;
-      const pending: Promise<void>[] = [];
-      window.dispatchEvent(new CustomEvent('omninote:flush-save', { detail: { waitUntil: (save: Promise<void>) => pending.push(save) } }));
-      await Promise.all(pending);
+      await flushPages();
       try {
         const status = await invoke<UpdateStatus>('prompt_to_install_update', { version: updateStatus.version });
         if (status.state === 'ignored' && status.version) localStorage.setItem('omninote.ignoredUpdate', status.version);
@@ -135,6 +142,6 @@ export function createTauriBridge(): WhiteboardBridge {
     setExtensionSetting: (extensionId: string, key: string, value: boolean | string) => invoke('set_extension_setting', { extensionId, key, value }),
     saveExtensionExport: (name: string, bytes: Uint8Array) => invoke('save_extension_export', { name, bytes: Array.from(bytes) }),
     exportWorkspace: () => invoke('export_workspace'),
-    exportPagePdf: () => unavailable('PDF export'),
+    exportPagePdf: async () => { window.print(); return true; },
   };
 }
