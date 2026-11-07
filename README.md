@@ -39,8 +39,8 @@ Installed extensions live in the workspace's `extensions/` directory. The Extens
 
 ## Current limits and testing
 
-Windows and Linux release plans and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). Existing [releases](https://github.com/SourCream206/omniNote/releases) are Electron builds until the first signed Tauri release is published.
+Windows and Linux installers and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The download page selects the latest published release; earlier releases used Electron.
 
 Full PDF document tabs can scroll through the complete file; canvas PDF previews and annotation printouts display the first 50 pages. XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. DOCX previews reflect the built-in renderer and may differ from Word pagination. Audio/video playback depends on Chromium's codec support; **Open original** uses the default local app. Link support depends on each previewer and should be checked against real documents. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 
-The M0 ink lab needs feedback on your actual stylus and device. Check pressure, tilt, palm rejection, eraser button, and perceived latency. See the [proposed Tauri v2 plan](docs/TAURI_PLAN.md) for the next architecture and milestone gates, the [historical Electron plan](docs/PLAN.md) for the current build, and [docs/VERSIONS.md](docs/VERSIONS.md) for runnable version checks.
+The HP Envy pen was checked with dense ink and a large PDF in the Ink Lab; pan and zoom improved after rendering changes. Long stress and input-latency measurements remain open. See the [Tauri v2 plan](docs/TAURI_PLAN.md), the [historical Electron plan](docs/PLAN.md), and [docs/VERSIONS.md](docs/VERSIONS.md) for version checks.
