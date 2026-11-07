@@ -3,6 +3,7 @@
 use omninote_workspace_core::Workspace;
 use serde_json::{json, Value};
 use std::fs;
+use std::path::Path;
 use std::sync::Mutex;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::{Manager, State};
@@ -236,6 +237,45 @@ fn camera_values(camera: &Value) -> Result<(f64, f64, f64), String> {
     Ok((number("x")?, number("y")?, number("zoom")?))
 }
 
+fn copy_workspace_files(source: &Path, destination: &Path, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    fs::create_dir(destination)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if source == root
+            && matches!(name.to_str(), Some("cache" | ".trash" | ".workspace.lock")) {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() { return Err("Workspace contains a symlink".into()); }
+        let target = destination.join(name);
+        if metadata.is_dir() { copy_workspace_files(&entry.path(), &target, root)?; }
+        else if metadata.is_file() { fs::copy(entry.path(), target)?; }
+        else { return Err("Workspace contains an unsupported file type".into()); }
+    }
+    Ok(())
+}
+
+fn open_workspace_at(local: &Path, previous: &Path) -> Result<Workspace, Box<dyn std::error::Error>> {
+    if local.join("workspace.json").exists() { return Ok(Workspace::open(local)?); }
+    if local.exists() { return Err("Local workspace directory already exists without a workspace manifest".into()); }
+    if previous.join("workspace.json").exists() {
+        // Keep the old workspace intact until the copied database and manifest have been opened.
+        let old = Workspace::open(previous)?;
+        let staging = local.with_file_name(format!(".Default-migrate-{}", Uuid::new_v4()));
+        let result = (|| -> Result<Workspace, Box<dyn std::error::Error>> {
+            copy_workspace_files(old.root(), &staging, old.root())?;
+            let checked = Workspace::open(&staging)?;
+            drop(checked);
+            fs::rename(&staging, local)?;
+            Ok(Workspace::open(local)?)
+        })();
+        if result.is_err() { let _ = fs::remove_dir_all(&staging); }
+        return result;
+    }
+    Ok(Workspace::create(local)?)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -246,19 +286,46 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
-            let documents = app.path().document_dir()?;
-            let parent = documents.join("omniNote").join("workspaces");
+            let parent = app.path().app_local_data_dir()?.join("workspaces");
             fs::create_dir_all(&parent)?;
             let path = parent.join("Default");
-            let workspace = if path.join("workspace.json").exists() {
-                Workspace::open(&path)?
-            } else {
-                Workspace::create(&path)?
-            };
+            let previous = app.path().document_dir()?.join("omniNote").join("workspaces").join("Default");
+            let workspace = open_workspace_at(&path, &previous)?;
             app.manage(WorkspaceState(Mutex::new(workspace)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external, updates::check_for_updates, updates::prompt_to_install_update])
         .run(tauri::generate_context!())
         .expect("failed to run omniNote");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_existing_workspace_to_platform_local_directory_without_deleting_original() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..").join(".tools")
+            .join(format!("omninote-workspace-path-{}", Uuid::new_v4()));
+        let previous = root.join("Documents/omniNote/workspaces/Default");
+        let local = root.join("LocalData/com.sourcream206.omninote/workspaces/Default");
+        fs::create_dir_all(local.parent().unwrap()).unwrap();
+        let mut original = Workspace::create(&previous).unwrap();
+        let notebook = original.create_notebook("Lecture notes").unwrap();
+        let original_id = original.id();
+        fs::write(original.root().join("cache/old-render.png"), b"disposable").unwrap();
+        drop(original);
+
+        let migrated = open_workspace_at(&local, &previous).unwrap();
+        assert_eq!(migrated.id(), original_id);
+        assert_eq!(migrated.list_all_nodes().unwrap()[0].id, notebook.id);
+        assert!(previous.join("workspace.json").exists());
+        assert!(!local.join("cache").join("old-render.png").exists());
+        drop(migrated);
+        let reopened = open_workspace_at(&local, &previous).unwrap();
+        assert_eq!(reopened.id(), original_id);
+        drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
 }

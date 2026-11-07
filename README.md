@@ -2,18 +2,19 @@
 
 **DOWNLOAD HERE:** [https://sourcream206.github.io/omniNote/](https://sourcream206.github.io/omniNote/)
 
-A local-first desktop notebook with nested folders and sections, an infinite canvas, vector ink, embedded original documents, and a local extension host. Phase 1 uses Electron, React, TypeScript, and SQLite. No account or sync service is involved.
+A local-first desktop notebook with nested folders, an infinite canvas, vector ink, embedded original documents, and extensions. The current desktop build uses Tauri 2, React, TypeScript, Rust, and SQLite. No account or sync service is involved.
 
 ## Run
 
-Install Node.js 22.12 or later and npm. On Windows, run:
+Install Node.js, Rust with the MSVC toolchain, and [Tauri's Windows prerequisites](https://v2.tauri.app/start/prerequisites/). On Windows, run:
 
 ```powershell
 npm ci
-npm start
+npm ci --prefix tauri-v2
+npm --prefix tauri-v2 run tauri -- dev
 ```
 
-`npm start` builds the renderer and opens the desktop app. On Windows, the workspace lives under `%USERPROFILE%\Documents\omniNote\workspace`, using the local profile Documents directory even if Windows redirects the Documents shortcut to OneDrive. Settings shows the exact path and has an **Open workspace folder** button. On the first launch after upgrading, the app copies an older workspace from Electron's `userData/workspace` to Documents and leaves the old copy in place. Set `WHITEBOARD_WORKSPACE` to an absolute directory to use an isolated test workspace. Run `npm run ink-lab` to open the original stylus input experiment, `npm run typecheck` for the TypeScript projects, or `npm test` for storage, backup, and document-link fixture checks.
+The Tauri app stores its default workspace in the platform's app-local data directory. On Windows this is normally under `%LOCALAPPDATA%\com.sourcream206.omninote\workspaces\Default`; Settings shows the exact path and has an **Open workspace folder** button. If an earlier Tauri workspace exists under the system Documents directory, the app copies it to the new location on first launch and leaves the original intact. The workspace folder has the same portable structure on Windows, Linux, macOS, Android, and iOS. Use **Export → Workspace backup ZIP** to move it between devices. `npm run build:tauri` checks and builds the renderer; `cargo test --manifest-path tauri-v2/src-tauri/Cargo.toml --lib` checks native commands.
 
 Inside the workspace, each notebook is a named folder at the root, with nested folders and imported documents in the same hierarchy shown in the app. Canvas pages appear as small `.omninote` pointer files. `notes.sqlite` remains the portable source of truth for page content and ink; `assets/` holds unchanged imported originals and `extensions/` holds installed extensions. The notebook folders are maintained by omniNote, so edits made to these files outside the app are not imported back into pages. Use **Export → Workspace backup ZIP** to make a portable copy, and close omniNote before manually copying or editing the live database.
 
@@ -30,7 +31,7 @@ Inside the workspace, each notebook is a named folder at the root, with nested f
 - Use **Paper** on each page to choose Blank, Dots, Grid, or Lines. New pages start blank; existing workspaces keep their dotted pages when upgraded. The paper style is saved with the page and follows pan and zoom.
 - The window opens maximized. In split view, the center divider resizes the two editor groups. The full screen control offers the current tab or both tabs side by side; **Tools** reveals the toolbar in that mode, and **Exit full screen** returns to the notebook layout.
 - Open **Settings** from the gear at the bottom of the activity rail to choose Classic Light, Midnight, Warm Paper, or Sage. The choice is saved on this machine. Themes change the workspace chrome while page paper stays light for existing ink and embedded documents.
-- The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets) and a PDF of the current visible page view. Pending canvas edits are saved before a backup starts and when the window closes. Test restores by extracting the ZIP into an empty workspace directory with the app closed.
+- The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets). Pending canvas edits are saved before a backup starts and when the window closes. Test restores by extracting the ZIP into an empty workspace directory with the app closed. Page PDF export still needs a Tauri implementation.
 
 ## Extensions
 
@@ -38,7 +39,7 @@ Local extensions live in the workspace's `extensions/` directory. The bundled `w
 
 ## Current limits and testing
 
-Windows and Linux downloads and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The [latest release](https://github.com/SourCream206/omniNote/releases/latest) is built from a version tag and includes update metadata. Linux has a portable AppImage from v0.0.8 and installable packages from v0.0.11.
+Windows and Linux release plans and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). Existing [releases](https://github.com/SourCream206/omniNote/releases) are Electron builds until the first signed Tauri release is published.
 
 Full PDF document tabs can scroll through the complete file; canvas PDF previews and annotation printouts display the first 50 pages. XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. DOCX previews reflect the built-in renderer and may differ from Word pagination. Audio/video playback depends on Chromium's codec support; **Open original** uses the default local app. Link support depends on each previewer and should be checked against real documents. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 

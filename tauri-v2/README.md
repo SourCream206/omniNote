@@ -1,6 +1,6 @@
-# Tauri v2 ink lab (M0)
+# Tauri v2 desktop app
 
-This is the disposable Windows pen and rendering spike for the fresh Tauri app described in [the plan](../docs/TAURI_PLAN.md). It has no notebook storage yet and does not alter the existing Electron app.
+This is the Tauri desktop shell for the omniNote workspace. It reuses the existing React interface and stores notebooks, pages, ink, assets, and extensions through the Rust workspace core. The earlier pen experiment remains available as a separate Ink Lab build.
 
 ## Run
 
@@ -8,10 +8,14 @@ Install [Node.js](https://nodejs.org/), [Rust with the MSVC toolchain](https://r
 
 ```powershell
 npm ci
-npm run tauri dev
+npm run tauri -- dev
 ```
 
-`npm test` checks the stroke geometry and camera transform. `npm run build` checks TypeScript and builds the web UI. `cargo check` in `src-tauri` checks the native shell.
+Install root dependencies with `npm ci` from the repository root first. `npm test` here checks the Ink Lab geometry; `npm run build` checks the desktop renderer. `cargo test --manifest-path src-tauri/Cargo.toml --lib` checks native commands. See [distribution instructions](../docs/DISTRIBUTION.md) for installers and signed updates.
+
+## Ink Lab
+
+Run `npm run start:ink-lab` for the original pen and rendering experiment. The device checklist below applies to that experiment.
 
 ## Device test
 
