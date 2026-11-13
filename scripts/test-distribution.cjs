@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { assertReleaseConfig, githubRepository, hasUpdateSource } = require('../electron/distribution.cjs');
 
 assert.throws(() => assertReleaseConfig({ marketplaceUrl: '', updateUrl: '' }), /updateUrl/);
@@ -11,4 +13,10 @@ assert.equal(githubRepository('https://github.com/SourCream206/omniNote'), null)
 assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote' }), true);
 assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote', githubPrivate: true }), true);
 assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
+const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
+const pngName = tauri.bundle.icon.find((name) => name.endsWith('.png'));
+assert.ok(pngName, 'AppImage needs a PNG bundle icon');
+const png = fs.readFileSync(path.join(__dirname, '..', 'tauri-v2', 'src-tauri', pngName));
+assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+assert.equal(png.readUInt32BE(16), png.readUInt32BE(20), 'AppImage icon must be square');
 console.log('Distribution address checks passed');
