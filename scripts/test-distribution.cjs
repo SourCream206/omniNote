@@ -14,6 +14,15 @@ assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote' }), tru
 assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote', githubPrivate: true }), true);
 assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
 const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
+const tauriPackage = require('../tauri-v2/package.json');
+const tauriLock = require('../tauri-v2/package-lock.json');
+assert.equal(tauriPackage.version, tauri.version, 'Tauri npm and app versions must match');
+assert.equal(tauriLock.version, tauri.version, 'Tauri npm lock version must match');
+assert.equal(tauriLock.packages[''].version, tauri.version, 'Tauri npm root lock version must match');
+const cargo = fs.readFileSync(path.join(__dirname, '..', 'tauri-v2', 'src-tauri', 'Cargo.toml'), 'utf8');
+const cargoLock = fs.readFileSync(path.join(__dirname, '..', 'tauri-v2', 'src-tauri', 'Cargo.lock'), 'utf8');
+assert.equal(cargo.match(/^version = "([^"]+)"/m)?.[1], tauri.version, 'Tauri Cargo version must match');
+assert.equal(cargoLock.match(/name = "omninote-tauri"\r?\nversion = "([^"]+)"/)?.[1], tauri.version, 'Tauri Cargo lock version must match');
 const pngName = tauri.bundle.icon.find((name) => name.endsWith('.png'));
 assert.ok(pngName, 'AppImage needs a PNG bundle icon');
 const png = fs.readFileSync(path.join(__dirname, '..', 'tauri-v2', 'src-tauri', pngName));
