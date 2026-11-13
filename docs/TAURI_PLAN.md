@@ -1,6 +1,6 @@
 # Proposed phase 1 plan: Tauri v2
 
-**Status: Tauri desktop integration built; release verification in progress.** This is a fresh Tauri app with no Electron user-data migration requirement. Reuse React, TypeScript, tests, document fixtures, and proven interaction patterns from the Electron app. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
+**Status: Tauri desktop integration built; signed Windows and Linux v0.1.1 release published.** An installed Linux smoke test and a version-to-version Tauri update test remain open. This is a fresh Tauri app with no Electron user-data migration requirement. Reuse React, TypeScript, tests, document fixtures, and proven interaction patterns from the Electron app. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
 
 ## Scope and architecture
 
