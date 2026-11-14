@@ -85,7 +85,7 @@
         ];
         let hasLinux = false;
         for (const [id, extension] of linuxAssets) {
-          const asset = release.assets.find((item) => item.name.startsWith('omniNote') && item.name.includes(version) && extension.test(item.name));
+          const asset = release.assets.find((item) => /^(?:omniNote|omninote-bin)/.test(item.name) && item.name.includes(version) && extension.test(item.name));
           if (!asset) continue;
           const link = document.getElementById(id);
           link.href = asset.browser_download_url;

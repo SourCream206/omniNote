@@ -2,6 +2,8 @@
 
 **DOWNLOAD HERE:** [https://sourcream206.github.io/omniNote/](https://sourcream206.github.io/omniNote/)
 
+On Arch Linux, download the `.pkg.tar.zst` file and install it with `sudo pacman -U ./omninote-bin-*.pkg.tar.zst`.
+
 A local-first desktop notebook with nested folders, an infinite canvas, vector ink, embedded original documents, and extensions. The current desktop build uses Tauri 2, React, TypeScript, Rust, and SQLite. No account or sync service is involved.
 
 ## Run

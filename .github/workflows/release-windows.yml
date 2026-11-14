@@ -60,9 +60,55 @@ jobs:
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --bundles ${{ matrix.bundles }}
+      - name: Keep Debian package for Arch packaging
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-source-deb
+          path: tauri-v2/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  arch:
+    needs: desktop
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch-source-deb
+          path: arch-source
+      - name: Build installable Arch package
+        shell: bash
+        run: |
+          pacman -Syu --noconfirm base-devel
+          useradd -m builder
+          install -d -o builder -g builder /tmp/omninote-arch
+          cp packaging/arch/PKGBUILD arch-source/*.deb /tmp/omninote-arch/
+          cd /tmp/omninote-arch
+          version="${GITHUB_REF_NAME#v}"
+          sed -i "s/^pkgver=.*/pkgver=$version/" PKGBUILD
+          sed -i "s/REPLACE_WITH_SHA256/$(sha256sum "omniNote_${version}_amd64.deb" | cut -d ' ' -f1)/" PKGBUILD
+          chown builder:builder PKGBUILD ./*.deb
+          su builder -c 'cd /tmp/omninote-arch && makepkg --noconfirm --clean'
+          pacman -Qip ./*.pkg.tar.zst
+          test "$(find . -maxdepth 1 -name '*.pkg.tar.zst' | wc -l)" -eq 1
+          pacman -U --noconfirm ./*.pkg.tar.zst
+          binary="$(pacman -Ql omninote-bin | awk '$2 ~ /^\/usr\/bin\// { print $2; exit }')"
+          test -n "$binary"
+          ldd -r "$binary" | tee /tmp/omninote-ldd.txt
+          ! grep -Eq 'not found|undefined symbol' /tmp/omninote-ldd.txt
+      - name: Add Arch package to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          pacman -S --noconfirm github-cli
+          gh release upload "$GITHUB_REF_NAME" /tmp/omninote-arch/*.pkg.tar.zst --clobber
 
   publish:
-    needs: desktop
+    needs: [desktop, arch]
     runs-on: ubuntu-latest
     steps:
       - name: Verify signed updater assets
@@ -75,6 +121,7 @@ jobs:
           grep -Eq '\.exe$' "$RUNNER_TEMP/assets.txt"
           grep -Eq '\.exe\.sig$' "$RUNNER_TEMP/assets.txt"
           grep -Eq '\.AppImage$' "$RUNNER_TEMP/assets.txt"
+          grep -Eq '\.pkg\.tar\.zst$' "$RUNNER_TEMP/assets.txt"
           gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir "$RUNNER_TEMP"
           jq -e '(.platforms | keys | any(startswith("windows"))) and (.platforms | keys | any(startswith("linux")))' "$RUNNER_TEMP/latest.json"
       - name: Publish complete release

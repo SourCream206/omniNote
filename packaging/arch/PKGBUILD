@@ -1,0 +1,25 @@
+pkgname=omninote-bin
+pkgver=0.0.0
+pkgrel=1
+pkgdesc='Local notebook for text, documents, and handwriting'
+arch=('x86_64')
+url='https://github.com/SourCream206/omniNote'
+license=('LicenseRef-Proprietary')
+depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'pango' 'webkit2gtk-4.1')
+provides=('omninote')
+conflicts=('omninote')
+options=('!strip' '!debug')
+source=("omniNote_${pkgver}_amd64.deb")
+noextract=("omniNote_${pkgver}_amd64.deb")
+sha256sums=('REPLACE_WITH_SHA256')
+
+package() {
+  local deb="${srcdir}/omniNote_${pkgver}_amd64.deb"
+  local data_archive
+  data_archive="$(ar t "$deb" | sed -n '/^data\.tar\./{p;q;}')"
+  if [[ -z "$data_archive" ]]; then
+    printf 'No data archive in %s\n' "$deb" >&2
+    return 1
+  fi
+  ar p "$deb" "$data_archive" | bsdtar -xpf - -C "$pkgdir"
+}
