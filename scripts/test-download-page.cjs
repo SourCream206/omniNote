@@ -38,9 +38,9 @@ checkRelease([
     'omniNote-0.1.0-1.x86_64.rpm', 'omniNote_0.1.0_amd64.AppImage',
   ], ['linux-deb', 'linux-rpm', 'linux-portable'], '0.1.0'))
   .then(() => checkRelease([
-    'omniNote_0.1.3_x64-setup.exe', 'omniNote_0.1.3_amd64.deb',
-    'omniNote-0.1.3-1.x86_64.rpm', 'omniNote_0.1.3_amd64.AppImage',
-    'omninote-bin-0.1.3-1-x86_64.pkg.tar.zst',
-  ], ['linux-deb', 'linux-rpm', 'linux-arch', 'linux-portable'], '0.1.3'))
+    'omniNote_0.1.4_x64-setup.exe', 'omniNote_0.1.4_amd64.deb',
+    'omniNote-0.1.4-1.x86_64.rpm', 'omniNote_0.1.4_amd64.AppImage',
+    'omninote-bin-0.1.4-1-x86_64.pkg.tar.zst',
+  ], ['linux-deb', 'linux-rpm', 'linux-arch', 'linux-portable'], '0.1.4'))
   .then(() => console.log('Download page release links passed'))
   .catch((error) => { console.error(error); process.exitCode = 1; });

@@ -81,7 +81,7 @@ jobs:
       - name: Build installable Arch package
         shell: bash
         run: |
-          pacman -Syu --noconfirm base-devel
+          pacman -Syu --noconfirm --needed base-devel cairo desktop-file-utils gdk-pixbuf2 gtk3 hicolor-icon-theme libayatana-appindicator libsoup3 pango webkit2gtk-4.1
           useradd -m builder
           install -d -o builder -g builder /tmp/omninote-arch
           cp packaging/arch/PKGBUILD arch-source/*.deb /tmp/omninote-arch/
