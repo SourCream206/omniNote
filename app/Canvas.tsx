@@ -616,7 +616,7 @@ export default Canvas;
 
 type InkPayload = { points: InkPoint[]; width: number; highlighter: boolean; color: string };
 const InkShape = memo(function InkShape({ payload, paperColor }: { payload: InkPayload; paperColor: string }) {
-  return <path d={inkPath(payload.points, payload.width * (payload.highlighter ? 3.5 : 1))} fill={readableInk(payload.color, paperColor, payload.highlighter)} opacity={payload.highlighter ? 0.35 : 1} />;
+  return <path d={inkPath(payload.points, payload.width * (payload.highlighter ? 3.5 : 1))} fill={readableInk(payload.color, paperColor, payload.highlighter)} style={{ '--stored-ink-color': payload.color } as React.CSSProperties} opacity={payload.highlighter ? 0.35 : 1} />;
 });
 
 function ToolButton({ icon, name, tool, active, onClick }: { icon: React.ReactNode; name: string; tool: CanvasTool; active: CanvasTool; onClick(tool: CanvasTool): void }) { return <button title={name} aria-pressed={active === tool} className={active === tool ? 'active' : ''} onClick={() => onClick(tool)}>{icon}<span>{name}</span></button>; }

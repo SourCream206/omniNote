@@ -265,6 +265,12 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .canvas-viewport .object-text:not(.boxed-note) .rich-content { color:var(--paper-foreground); }
 .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: rgb(0, 0, 0)"],
 .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: #000"] { color:#fff !important; }
+@media print {
+  .canvas-viewport .ink-svg path { fill:var(--stored-ink-color) !important; }
+  .canvas-viewport .object-text:not(.boxed-note) .rich-content,
+  .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: rgb(0, 0, 0)"],
+  .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: #000"] { color:#182334 !important; }
+}
 .canvas-viewport[data-paper=dots] { background-image:radial-gradient(var(--ui-paper-line) 1px,transparent 1px); }
 .canvas-viewport[data-paper=grid] { background-image:linear-gradient(to right,var(--ui-paper-line) 1px,transparent 1px),linear-gradient(to bottom,var(--ui-paper-line) 1px,transparent 1px); }
 .canvas-viewport[data-paper=lines] { background-image:linear-gradient(to bottom,transparent calc(100% - 1px),var(--ui-paper-line) calc(100% - 1px)); }
