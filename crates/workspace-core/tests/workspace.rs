@@ -12,6 +12,8 @@ fn page_state_round_trips_ink_and_camera() {
     let stroke = serde_json::json!({"id":"stroke-1","page_id":page.id.to_string(),"type":"ink","payload":{"points":[{"x":1,"y":2}]}});
     workspace.save_page(page.id, &[stroke.clone()], 12.0, -9.0, 1.5).unwrap();
     workspace.set_page_style(page.id, "grid").unwrap();
+    workspace.set_page_color(page.id, "#183450").unwrap();
+    assert!(workspace.set_page_color(page.id, "red").is_err());
     assert!(workspace.save_page(page.id, &[serde_json::json!({"page_id":"another-page"})], 0.0, 0.0, 1.0).is_err());
     drop(workspace);
     let reopened = Workspace::open(&temp.path().join("Workspace")).unwrap();
@@ -20,6 +22,7 @@ fn page_state_round_trips_ink_and_camera() {
     assert_eq!(pages[0].objects, vec![stroke]);
     assert_eq!(pages[0].camera_x, 12.0);
     assert_eq!(pages[0].paper_style, "grid");
+    assert_eq!(pages[0].paper_color, "#183450");
 }
 
 #[test]
@@ -255,16 +258,35 @@ fn opens_an_existing_preview_workspace_without_losing_notes() {
     drop(workspace);
 
     let database = rusqlite::Connection::open(root.join("notes.sqlite")).unwrap();
-    database.execute_batch("ALTER TABLE nodes DROP COLUMN folder_icon; ALTER TABLE nodes DROP COLUMN folder_color; DROP TABLE document_pages; DROP TABLE assets; PRAGMA user_version=1;").unwrap();
+    database.execute_batch("ALTER TABLE nodes DROP COLUMN folder_icon; ALTER TABLE nodes DROP COLUMN folder_color; ALTER TABLE page_state DROP COLUMN paper_color; DROP TABLE document_pages; DROP TABLE assets; PRAGMA user_version=1;").unwrap();
     drop(database);
     let manifest = root.join("workspace.json");
-    fs::write(&manifest, fs::read_to_string(&manifest).unwrap().replace("\"format_version\": 2", "\"format_version\": 1")).unwrap();
+    fs::write(&manifest, fs::read_to_string(&manifest).unwrap().replace(&format!("\"format_version\": {}", WORKSPACE_VERSION), "\"format_version\": 1")).unwrap();
 
     let upgraded = Workspace::open(&root).unwrap();
     assert_eq!(upgraded.version(), WORKSPACE_VERSION);
     assert_eq!(upgraded.database_version().unwrap(), WORKSPACE_VERSION);
     assert_eq!(upgraded.list_pages().unwrap()[0].objects, vec![object]);
+    assert_eq!(upgraded.list_pages().unwrap()[0].paper_color, "#ffffff");
     assert_eq!(upgraded.list_children(Some(notebook.id)).unwrap()[0].folder_icon, "default");
+}
+
+#[test]
+fn upgrades_version_two_paper_to_a_saved_color() {
+    let temp = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = temp.path().join("Workspace");
+    let mut workspace = Workspace::create(&root).unwrap();
+    let notebook = workspace.create_notebook("Class").unwrap();
+    workspace.create_page(notebook.id, "Lecture").unwrap();
+    drop(workspace);
+    let database = rusqlite::Connection::open(root.join("notes.sqlite")).unwrap();
+    database.execute_batch("ALTER TABLE page_state DROP COLUMN paper_color; PRAGMA user_version=2;").unwrap();
+    drop(database);
+    let manifest = root.join("workspace.json");
+    fs::write(&manifest, fs::read_to_string(&manifest).unwrap().replace(&format!("\"format_version\": {}", WORKSPACE_VERSION), "\"format_version\": 2")).unwrap();
+    let upgraded = Workspace::open(&root).unwrap();
+    assert_eq!(upgraded.database_version().unwrap(), WORKSPACE_VERSION);
+    assert_eq!(upgraded.list_pages().unwrap()[0].paper_color, "#ffffff");
 }
 
 #[test]

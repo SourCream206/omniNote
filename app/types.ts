@@ -3,7 +3,7 @@ export type FolderIcon = 'default' | 'docs' | 'download';
 export type CanvasTool = 'select' | 'text' | 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'hand';
 export interface TreeNode { id: string; parent_id: string | null; kind: NodeKind; title: string; order_index: number; created_at: string; updated_at: string; folder_icon: FolderIcon; folder_color: string }
 export type PaperStyle = 'blank' | 'dots' | 'grid' | 'lines';
-export interface PageRow { id: string; camera_x: number; camera_y: number; camera_zoom: number; paper_style: PaperStyle }
+export interface PageRow { id: string; camera_x: number; camera_y: number; camera_zoom: number; paper_style: PaperStyle; paper_color: string }
 export interface Asset { id: string; relative_path: string; original_name: string; mime_type: string; sha256: string; size: number; updated_at: string }
 export interface InkPoint { x: number; y: number; pressure: number; tiltX: number; tiltY: number; timestamp: number }
 export type ObjectPayload =
@@ -47,6 +47,7 @@ export interface WhiteboardBridge {
   saveCamera(pageId: string, camera: Camera): Promise<void>;
   savePageSync(pageId: string, objects: CanvasObject[], camera: Camera): void;
   setPageStyle(pageId: string, style: PaperStyle): Promise<void>;
+  setPageColor(pageId: string, color: string): Promise<void>;
   importAsset(name: string, mimeType: string, bytes: Uint8Array): Promise<Asset>;
   pickAssets(): Promise<Asset[]>;
   readAsset(assetId: string): Promise<Uint8Array>;

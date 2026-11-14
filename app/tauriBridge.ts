@@ -67,6 +67,7 @@ export function createTauriBridge(): WhiteboardBridge {
     saveCamera: (pageId: string, camera: Camera) => saveInOrder(pageId, () => invoke('save_camera', { pageId, camera })),
     savePageSync: () => { throw new Error('Wait for the page to finish saving before closing.'); },
     setPageStyle: (pageId: string, style: PaperStyle) => invoke('set_page_style', { pageId, style }),
+    setPageColor: (pageId: string, color: string) => saveInOrder(pageId, () => invoke('set_page_color', { pageId, color })),
     setFullScreen: (enabled: boolean) => appWindow.setFullscreen(enabled),
     windowAction: async (action) => {
       if (action === 'minimize') { await appWindow.minimize(); return false; }

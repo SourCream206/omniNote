@@ -24,7 +24,7 @@ export default function MarketplacePanel({ query, installedIds, search, install 
   }
 
   return <section className="marketplace-section" aria-label="Marketplace">
-    <h3>Marketplace</h3>
+    <div className="marketplace-heading"><h3>Marketplace</h3><button type="button" onClick={() => window.whiteboard.openExternal('https://github.com/SourCream206/omniNote/issues/new?template=extension-submission.yml')}>Submit ↗</button></div>
     {loading && <p className="extensions-empty" role="status">Searching…</p>}
     {error && <p className="extensions-empty" role="alert">{error}</p>}
     {!loading && !error && result && !result.configured && <p className="extensions-empty">Marketplace address is not configured yet.</p>}

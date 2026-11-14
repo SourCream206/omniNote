@@ -1,0 +1,40 @@
+name: Submit an extension
+description: Propose an extension for the omniNote marketplace
+title: "Extension: "
+body:
+  - type: input
+    id: repository
+    attributes:
+      label: Source repository
+      description: Public HTTPS link to the extension source and extension.json manifest.
+      placeholder: https://github.com/author/extension
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: What does it do?
+      description: Describe its commands, views, and why someone would install it.
+    validations:
+      required: true
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permissions and external links
+      description: List the permissions requested in extension.json and any websites opened by the extension.
+    validations:
+      required: true
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Review
+      options:
+        - label: I have tested this version in omniNote and can provide the source for review.
+          required: true

@@ -1,10 +1,12 @@
 # Local extensions (API 1.0)
 
-## Marketplace scaffold
+## Marketplace
 
 The Extensions sidebar can search a configured online catalog and install a package into the local `extensions/` directory. The package must be on the catalog's HTTPS origin, match its SHA-256 digest, and have a manifest with the listed ID, version, API version, and permissions. New installs stay disabled until the user reviews and grants their permissions. Installed extensions continue to work offline. Extension update and uninstall flows are not implemented yet.
 
-`distribution.json` points to the public GitHub Pages catalog at `https://sourcream206.github.io/omniNote/catalog.json`. The `.github/workflows/marketplace-pages.yml` workflow rebuilds and publishes the catalog when its extension source changes; the app fetches it when Extensions opens or the search changes. Package paths are relative to the catalog. For local development, `OMNINOTE_MARKETPLACE_URL` may point to an HTTP loopback server. Generate an example catalog and package with `npm run marketplace:example`, then serve `marketplace/dist/` locally. The catalog and packages are public; installed extensions continue to work offline. Publishing other people's extensions will need a review process before opening submissions.
+`distribution.json` points to the public GitHub Pages catalog at `https://sourcream206.github.io/omniNote/catalog.json`. The `.github/workflows/marketplace-pages.yml` workflow rebuilds and publishes the catalog when its registry or extension source changes; the app fetches it when Extensions opens or the search changes. Package paths are relative to the catalog. For local development, generate the catalog with `npm run marketplace:example`, then serve `marketplace/dist/` locally. The catalog and packages are public; installed extensions continue to work offline.
+
+To propose an extension, use **Submit** in the app or [the submission form](https://github.com/SourCream206/omniNote/issues/new?template=extension-submission.yml). Include a public source repository, version, what it does, and its permissions. After review, a maintainer copies the flat extension files into `marketplace/extensions-src/<publisher.extension>/` and adds `{ "source": "marketplace/extensions-src/<publisher.extension>", "summary": "..." }` to `marketplace/registry.json`. A pull request can include those files and registry entry directly. `npm run marketplace:example` packages registered extensions and calculates their SHA-256 hashes; merging to `main` publishes the new catalog through GitHub Pages. The maintainer reviews all submissions before merging.
 
 Catalog format:
 
@@ -24,11 +26,11 @@ Catalog format:
 }
 ```
 
-The ZIP contains flat files: `extension.json`, the declared `.js` entry, and any declared `.html` views. The main process fetches and checks the catalog and package; extension workers and frames still have no direct network access. The digest protects against a package that differs from the trusted catalog, so control of the catalog host remains a security boundary. Third-party publishing will need a review and signing process before opening submissions.
+The ZIP contains flat files: `extension.json`, the declared `.js` entry, and any declared `.html` views. The main process fetches and checks the catalog and package; extension workers and frames still have no direct network access. The digest protects against a package that differs from the trusted catalog, so control of the catalog host remains a security boundary.
 
 Extensions are directories under the active workspace's `extensions/` folder. Each directory name must match the `id` in its `extension.json`. The app loads installed extensions disabled by default. Open **Extensions** from the left activity rail to review and enable one; the enable dialog lists its requested permissions.
 
-The bundled `whiteboard.date-insert` is the small core example. It is copied on first launch and pre-enabled only when its source matches the bundled file. `examples/contributions/` is a broader demonstration; copy that directory to `extensions/omninote.contributions` to inspect its contribution points. It is not installed automatically.
+The bundled `whiteboard.date-insert` is the small core example. It is copied on first launch and pre-enabled only when its source matches the bundled file. `examples/contributions/` remains a development fixture for extension API tests and is not in the marketplace.
 
 ## Manifest
 

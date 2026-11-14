@@ -31,7 +31,7 @@ fn load_workspace(state: State<'_, WorkspaceState>) -> Result<Value, String> {
     let page_data = workspace.list_pages().map_err(|error| error.to_string())?;
     let pages: Vec<_> = page_data.iter().map(|page| json!({
         "id": page.id, "camera_x": page.camera_x, "camera_y": page.camera_y,
-        "camera_zoom": page.camera_zoom, "paper_style": page.paper_style
+        "camera_zoom": page.camera_zoom, "paper_style": page.paper_style, "paper_color": page.paper_color
     })).collect();
     let objects: Vec<_> = page_data.into_iter().flat_map(|page| page.objects).collect();
     let document_pages: Vec<_> = workspace.list_document_pages().map_err(|error| error.to_string())?
@@ -232,6 +232,12 @@ fn set_page_style(state: State<'_, WorkspaceState>, page_id: String, style: Stri
         .set_page_style(parse_id(&page_id)?, &style).map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn set_page_color(state: State<'_, WorkspaceState>, page_id: String, color: String) -> Result<(), String> {
+    state.0.lock().map_err(|_| "Workspace lock failed")?
+        .set_page_color(parse_id(&page_id)?, &color).map_err(|error| error.to_string())
+}
+
 fn camera_values(camera: &Value) -> Result<(f64, f64, f64), String> {
     let number = |key| camera.get(key).and_then(Value::as_f64).ok_or_else(|| format!("Invalid camera {key}"));
     Ok((number("x")?, number("y")?, number("zoom")?))
@@ -294,7 +300,7 @@ pub fn run() {
             app.manage(WorkspaceState(Mutex::new(workspace)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external, updates::check_for_updates, updates::prompt_to_install_update])
+        .invoke_handler(tauri::generate_handler![load_workspace, create_node, create_document_page, rename_node, set_folder_appearance, delete_node, move_node, save_page, save_camera, set_page_style, set_page_color, import_asset_raw, read_asset, pick_assets, export_workspace, list_extensions, search_marketplace, install_marketplace_extension, extension_source, extension_resource, enable_extension, set_extension_setting, save_extension_export, open_workspace_folder, reveal_node, open_original, open_external, updates::check_for_updates, updates::prompt_to_install_update])
         .run(tauri::generate_context!())
         .expect("failed to run omniNote");
 }

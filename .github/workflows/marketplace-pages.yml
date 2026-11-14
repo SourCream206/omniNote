@@ -5,8 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/marketplace-pages.yml'
-      - 'examples/contributions/**'
       - 'examples/date-insert/**'
+      - 'marketplace/extensions-src/**'
+      - 'marketplace/registry.json'
       - 'scripts/build-marketplace-example.cjs'
       - 'marketplace/index.html'
       - 'marketplace/extensions/index.html'

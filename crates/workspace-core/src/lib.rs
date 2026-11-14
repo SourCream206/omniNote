@@ -13,7 +13,7 @@ use uuid::Uuid;
 mod extensions;
 pub use extensions::{valid_extension_file, valid_extension_id};
 
-pub const WORKSPACE_VERSION: u32 = 2;
+pub const WORKSPACE_VERSION: u32 = 3;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Error)]
@@ -99,6 +99,7 @@ pub struct PageState {
     pub camera_y: f64,
     pub camera_zoom: f64,
     pub paper_style: String,
+    pub paper_color: String,
     pub objects: Vec<serde_json::Value>,
 }
 
@@ -163,6 +164,7 @@ impl Workspace {
                camera_y REAL NOT NULL DEFAULT 0,
                camera_zoom REAL NOT NULL DEFAULT 1,
                paper_style TEXT NOT NULL DEFAULT 'blank',
+               paper_color TEXT NOT NULL DEFAULT '#ffffff',
                objects_json TEXT NOT NULL DEFAULT '[]'
              );
              CREATE TABLE assets (
@@ -180,7 +182,7 @@ impl Workspace {
              );
              CREATE TABLE extension_state (extension_id TEXT NOT NULL, key TEXT NOT NULL, value_json TEXT NOT NULL, PRIMARY KEY(extension_id, key));
              CREATE TABLE extension_grants (extension_id TEXT NOT NULL, permission TEXT NOT NULL, PRIMARY KEY(extension_id, permission));
-             PRAGMA user_version = 2;",
+             PRAGMA user_version = 3;",
         )?;
         connection.execute(
             "INSERT INTO workspace_meta (key, value) VALUES ('workspace_id', ?1)",
@@ -262,10 +264,18 @@ impl Workspace {
                  PRAGMA user_version = 2;
                  COMMIT;",
             )?;
-        } else if version != WORKSPACE_VERSION {
+        } else if version != 2 && version != WORKSPACE_VERSION {
             return Err(WorkspaceError::UnsupportedVersion(version));
         }
-        if manifest.format_version == 1 {
+        if version < WORKSPACE_VERSION {
+            connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 ALTER TABLE page_state ADD COLUMN paper_color TEXT NOT NULL DEFAULT '#ffffff';
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )?;
+        }
+        if manifest.format_version < WORKSPACE_VERSION {
             manifest.format_version = WORKSPACE_VERSION;
             let temporary = root.join("workspace.json.tmp");
             fs::write(&temporary, serde_json::to_vec_pretty(&manifest)?)?;
@@ -409,16 +419,16 @@ impl Workspace {
 
     pub fn list_pages(&self) -> Result<Vec<PageState>, WorkspaceError> {
         let mut statement = self.connection.prepare(
-            "SELECT id, camera_x, camera_y, camera_zoom, paper_style, objects_json FROM page_state",
+            "SELECT id, camera_x, camera_y, camera_zoom, paper_style, paper_color, objects_json FROM page_state",
         )?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get::<_, String>(5)?))
+            Ok((row.get::<_, String>(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get::<_, String>(6)?))
         })?;
         rows.map(|row| {
-            let (id, camera_x, camera_y, camera_zoom, paper_style, objects_json) = row?;
+            let (id, camera_x, camera_y, camera_zoom, paper_style, paper_color, objects_json) = row?;
             Ok(PageState {
                 id: Uuid::parse_str(&id).map_err(|_| WorkspaceError::InvalidManifest)?,
-                camera_x, camera_y, camera_zoom, paper_style,
+                camera_x, camera_y, camera_zoom, paper_style, paper_color,
                 objects: serde_json::from_str(&objects_json)?,
             })
         }).collect()
@@ -452,6 +462,15 @@ impl Workspace {
     pub fn set_page_style(&self, page_id: Uuid, style: &str) -> Result<(), WorkspaceError> {
         if !matches!(style, "blank" | "dots" | "grid" | "lines") { return Err(WorkspaceError::InvalidManifest); }
         let changed = self.connection.execute("UPDATE page_state SET paper_style = ?2 WHERE id = ?1", params![page_id.to_string(), style])?;
+        if changed == 0 { return Err(WorkspaceError::InvalidParent); }
+        Ok(())
+    }
+
+    pub fn set_page_color(&self, page_id: Uuid, color: &str) -> Result<(), WorkspaceError> {
+        if color.len() != 7 || !color.starts_with('#') || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(WorkspaceError::InvalidManifest);
+        }
+        let changed = self.connection.execute("UPDATE page_state SET paper_color = ?2 WHERE id = ?1", params![page_id.to_string(), color.to_ascii_lowercase()])?;
         if changed == 0 { return Err(WorkspaceError::InvalidParent); }
         Ok(())
     }

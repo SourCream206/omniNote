@@ -12,6 +12,7 @@ import MarketplacePanel from './MarketplacePanel';
 import DocumentPage from './DocumentPage';
 import { readTheme, themes, type ThemeId } from './theme';
 import type { FullscreenScope } from './FullscreenControl';
+import { readableInk } from './pageColor';
 
 const childrenOf = (nodes: TreeNode[], parentId: string | null) => nodes.filter((node) => node.parent_id === parentId).sort((a, b) => a.order_index - b.order_index);
 type TreeDrop = { id: string; placement: 'before' | 'after' | 'inside'; parentId: string | null; beforeId: string | null };
@@ -34,6 +35,7 @@ function treeDropFor(nodes: TreeNode[], sourceId: string, targetId: string, poin
 }
 const firstPageIn = (nodes: TreeNode[], sectionId: string) => childrenOf(nodes, sectionId).find((node) => node.kind === 'page')?.id ?? null;
 const paperChoices: { style: PaperStyle; label: string }[] = [{ style: 'blank', label: 'Blank' }, { style: 'dots', label: 'Dots' }, { style: 'grid', label: 'Grid' }, { style: 'lines', label: 'Lines' }];
+const paperColors = ['#ffffff', '#fffaf0', '#e9f3e9', '#e9f0ff', '#242b36'];
 export default function App() {
   const [dialogRequest, setDialogRequest] = useState<{ title: string; message?: string; mode: 'text' | 'confirm'; action: string } | null>(null);
   const [dialogValue, setDialogValue] = useState('');
@@ -60,6 +62,7 @@ export default function App() {
   const [activePanel, setActivePanel] = useState<'explorer' | 'extensions' | 'settings' | null>('explorer');
   useEffect(() => { setCreateMenuOpen(false); }, [activePanel]);
   const [theme, setTheme] = useState<ThemeId>(readTheme);
+  const [accentColor, setAccentColor] = useState(() => localStorage.getItem('omninote.accentColor') ?? '');
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [focusMode, setFocusMode] = useState(false);
   const [focusScope, setFocusScope] = useState<FullscreenScope>('current');
@@ -87,7 +90,7 @@ export default function App() {
     setSnapshot(data);
     return data;
   }, []);
-  const refreshExtensions = useCallback(async () => setExtensions(await window.whiteboard.listExtensions()), []);
+  const refreshExtensions = useCallback(async () => setExtensions((await window.whiteboard.listExtensions()).filter((item) => item.manifest.id !== 'omninote.contributions')), []);
   const searchMarketplace = useCallback((query: string): Promise<MarketplaceSearch> => window.whiteboard.searchMarketplace(query), []);
   const installMarketplace = useCallback(async (entry: MarketplaceEntry) => {
     await window.whiteboard.installMarketplaceExtension(entry.id, entry.version);
@@ -118,6 +121,19 @@ export default function App() {
   useEffect(() => { localStorage.setItem('omninote.sidebarWidth', String(sidebarWidth)); }, [sidebarWidth]);
   useEffect(() => { localStorage.setItem('omninote.splitRatio', String(splitRatio)); }, [splitRatio]);
   useLayoutEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('omninote.theme', theme); }, [theme]);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (/^#[0-9a-f]{6}$/i.test(accentColor)) {
+      const readable = readableInk(accentColor, theme === 'midnight' ? '#252e39' : theme === 'warm' ? '#fffaf2' : '#ffffff');
+      root.style.setProperty('--ui-accent', readable);
+      root.style.setProperty('--ui-accent-fill', readable);
+      root.style.setProperty('--ui-selected', `color-mix(in srgb, ${readable} 14%, var(--ui-surface))`);
+      localStorage.setItem('omninote.accentColor', accentColor);
+    } else {
+      for (const property of ['--ui-accent', '--ui-accent-fill', '--ui-selected']) root.style.removeProperty(property);
+      localStorage.removeItem('omninote.accentColor');
+    }
+  }, [accentColor, theme]);
 
   useEffect(() => {
     const closeMenus = (event: PointerEvent) => {
@@ -464,6 +480,14 @@ export default function App() {
     } catch (error) { notifyError(error); }
   }
 
+  async function changePaperColor(color: string) {
+    if (!activePageId) return;
+    try {
+      await window.whiteboard.setPageColor(activePageId, color);
+      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === activePageId ? { ...row, paper_color: color } : row) } : previous);
+    } catch (error) { notifyError(error); }
+  }
+
   async function insertFiles(presentation: 'block' | 'printout' = 'block') {
     setInsertOpen(false);
     try {
@@ -536,10 +560,11 @@ export default function App() {
 
   if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
   const paperStyle = snapshot.pages.find((row) => row.id === activePageId)?.paper_style ?? 'blank';
+  const paperColor = snapshot.pages.find((row) => row.id === activePageId)?.paper_color ?? '#ffffff';
   const toolbarActions = <>
     {activePageId && snapshot.documentPages.some((item) => item.page_id === activePageId) && annotationPages.has(activePageId) && <button className="header-button" onClick={() => setAnnotationPages((before) => { const next = new Set(before); next.delete(activePageId); return next; })}>View document</button>}
     <div className="export-control" ref={exportRef}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Print current view / PDF</button><button onClick={() => { setExportOpen(false); Promise.resolve((activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.flushPendingSave()).then(() => window.whiteboard.exportWorkspace()).catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div>}</div>
-    <div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}</div>}</div>
+    <div className="paper-control" ref={paperRef}><button className="paper-button" aria-expanded={paperOpen} onClick={() => setPaperOpen((open) => !open)}><Grid2X2 size={15} /> Paper <ChevronDown size={13} /></button>{paperOpen && <div className="paper-menu">{paperChoices.map((choice) => <button key={choice.style} className={paperStyle === choice.style ? 'selected' : ''} onClick={() => changePaper(choice.style)}>{choice.label}{paperStyle === choice.style && <Check size={14} />}</button>)}<div className="paper-color-options" aria-label="Page color">{paperColors.map((choice) => <button key={choice} type="button" aria-label={`Page color ${choice}`} aria-pressed={paperColor === choice} title={choice} style={{ backgroundColor: choice }} onClick={() => void changePaperColor(choice)} />)}<label title="Custom page color"><span>Custom</span><input type="color" aria-label="Custom page color" value={paperColor} onChange={(event) => void changePaperColor(event.target.value)} /></label></div></div>}</div>
     <div className="insert-control" ref={insertRef}><button className="header-button" aria-expanded={insertOpen} onClick={() => setInsertOpen((open) => !open)}><Upload size={15} /> Insert file <ChevronDown size={12} /></button>{insertOpen && <div className="insert-menu"><button onClick={() => insertFiles('block')}>As embedded block</button><button onClick={() => insertFiles('printout')}>As page printout <small>PDF or DOCX</small></button></div>}</div>
   </>;
   const renderPane = (id: string | null, pane: 0 | 1) => {
@@ -584,7 +609,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
+        </> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={setTheme} accentColor={accentColor} onAccentChange={setAccentColor} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area" style={{ '--split-percent': `${splitRatio}%` } as React.CSSProperties} onDragOverCapture={(event) => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setFileDropPane((event.target as HTMLElement).closest('.canvas-viewport') ? null : paneAtDrop(event)); }} onDragLeave={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX <= bounds.left || event.clientX >= bounds.right || event.clientY <= bounds.top || event.clientY >= bounds.bottom) setFileDropPane(null); }} onDropCapture={(event) => { if (!event.dataTransfer.files.length) return; setFileDropPane(null); if ((event.target as HTMLElement).closest('.canvas-viewport')) return; event.preventDefault(); event.stopPropagation(); void openDroppedFiles(Array.from(event.dataTransfer.files), paneAtDrop(event)).catch(notifyError); }}>
@@ -622,7 +647,7 @@ function ExtensionsPanel({ extensions, onToggle, onSetting, onSearch, onInstall 
   </div>;
 }
 
-function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates, directory, onOpenWorkspace }: { theme: ThemeId; onThemeChange(value: ThemeId): void; updateStatus: UpdateStatus; onCheckUpdates(): void; directory: string; onOpenWorkspace(): void }) {
+function SettingsPanel({ theme, onThemeChange, accentColor, onAccentChange, updateStatus, onCheckUpdates, directory, onOpenWorkspace }: { theme: ThemeId; onThemeChange(value: ThemeId): void; accentColor: string; onAccentChange(value: string): void; updateStatus: UpdateStatus; onCheckUpdates(): void; directory: string; onOpenWorkspace(): void }) {
   return <div className="settings-panel">
     <div className="sidebar-title"><span>SETTINGS</span></div>
     <div className="settings-scroll">
@@ -642,7 +667,8 @@ function SettingsPanel({ theme, onThemeChange, updateStatus, onCheckUpdates, dir
           {theme === choice.id && <Check size={15} aria-hidden="true" />}
         </button>)}
       </div>
-      <p className="settings-hint">Themes change the workspace. Page paper stays light so existing ink and documents remain easy to read.</p>
+      <label className="settings-color-row">Accent color <input type="color" aria-label="Accent color" value={accentColor || (theme === 'midnight' ? '#a6d0f4' : '#315b93')} onChange={(event) => onAccentChange(event.target.value)} /></label>
+      {accentColor && <button type="button" className="settings-reset-color" onClick={() => onAccentChange('')}>Use theme accent</button>}
       <div className="settings-section-heading">Local files</div>
       <p className="settings-hint settings-workspace-path" title={directory}>{directory}</p>
       <button className="settings-check-update" onClick={onOpenWorkspace}>Open workspace folder</button>
