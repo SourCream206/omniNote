@@ -60,6 +60,19 @@ jobs:
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --bundles ${{ matrix.bundles }}
+      - name: Verify Linux desktop launcher
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          deb="$(find tauri-v2/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
+          mkdir -p "$RUNNER_TEMP/omninote-deb"
+          dpkg-deb --extract "$deb" "$RUNNER_TEMP/omninote-deb"
+          launcher="$RUNNER_TEMP/omninote-deb/usr/share/applications/omniNote.desktop"
+          test -f "$launcher"
+          grep -Fx 'Exec=omniNote' "$launcher"
+          grep -Fx 'StartupWMClass=omniNote' "$launcher"
+          test -x "$RUNNER_TEMP/omninote-deb/usr/bin/omniNote"
       - name: Keep Debian package for Arch packaging
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4

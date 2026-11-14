@@ -14,6 +14,8 @@ assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote' }), tru
 assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote', githubPrivate: true }), true);
 assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
 const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
+const linuxTauri = require('../tauri-v2/src-tauri/tauri.linux.conf.json');
+assert.equal(linuxTauri.mainBinaryName, tauri.productName, 'Linux binary name must match the desktop launcher name');
 const tauriPackage = require('../tauri-v2/package.json');
 const tauriLock = require('../tauri-v2/package-lock.json');
 assert.equal(tauriPackage.version, tauri.version, 'Tauri npm and app versions must match');
