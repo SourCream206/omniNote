@@ -10,7 +10,7 @@
     "frontendDist": "../../dist-tauri"
   },
   "app": {
-    "windows": [{ "title": "omniNote", "width": 1440, "height": 900, "minWidth": 900, "minHeight": 650, "decorations": false, "maximized": true }],
+    "windows": [{ "title": "omniNote", "width": 1440, "height": 900, "minWidth": 900, "minHeight": 650, "decorations": false, "maximized": true, "dragDropEnabled": false }],
     "security": { "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self' blob: data:; connect-src 'self' ipc: http://ipc.localhost blob:; frame-src 'self' blob:; object-src 'none'" }
   },
   "bundle": { "active": true, "createUpdaterArtifacts": true, "icon": ["icons/icon.png", "icons/icon.ico"] },

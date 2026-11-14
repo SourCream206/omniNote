@@ -426,6 +426,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   }
   async function onDrop(event: React.DragEvent) {
     event.preventDefault();
+    event.stopPropagation();
     const point = world(screen(event.nativeEvent));
     const files = Array.from(event.dataTransfer.files);
     const presentation = event.shiftKey ? 'printout' : 'block';

@@ -14,6 +14,7 @@ assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote' }), tru
 assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote', githubPrivate: true }), true);
 assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
 const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
+assert.equal(tauri.app.windows[0].dragDropEnabled, false, 'HTML file drops must reach the canvas and explorer');
 const linuxTauri = require('../tauri-v2/src-tauri/tauri.linux.conf.json');
 assert.equal(linuxTauri.mainBinaryName, tauri.productName, 'Linux binary name must match the desktop launcher name');
 const tauriPackage = require('../tauri-v2/package.json');
