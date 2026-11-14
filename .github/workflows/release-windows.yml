@@ -94,7 +94,7 @@ jobs:
           pacman -Qip ./*.pkg.tar.zst
           test "$(find . -maxdepth 1 -name '*.pkg.tar.zst' | wc -l)" -eq 1
           pacman -U --noconfirm ./*.pkg.tar.zst
-          binary="$(pacman -Ql omninote-bin | awk '$2 ~ /^\/usr\/bin\// { print $2; exit }')"
+          binary="$(pacman -Ql omninote-bin | awk '$2 ~ /^\/usr\/bin\/[^/]+$/ { print $2; exit }')"
           test -n "$binary"
           ldd -r "$binary" | tee /tmp/omninote-ldd.txt
           ! grep -Eq 'not found|undefined symbol' /tmp/omninote-ldd.txt

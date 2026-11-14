@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "omninote-tauri"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "omninote-workspace-core",
  "reqwest",
