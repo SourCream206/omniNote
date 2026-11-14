@@ -15,6 +15,12 @@ export function darkPaper(hex: string): boolean { return luminance(hex) < 0.18; 
 
 export function paperLines(hex: string): string { return darkPaper(hex) ? '#ffffff35' : '#16263a25'; }
 
+export function mixColor(base: string, target: string, targetAmount: number): string {
+  const left = rgb(base);
+  const right = rgb(target);
+  return `#${left.map((value, index) => Math.round(value * (1 - targetAmount) + right[index] * targetAmount).toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function readableInk(ink: string, paper: string, highlighter = false): string {
   if (highlighter) return ink;
   const a = luminance(ink);

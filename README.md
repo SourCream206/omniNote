@@ -32,7 +32,7 @@ Inside the workspace, each notebook is a named folder at the root, with nested f
 - Right-click a canvas item in any tool for Copy, Cut, Duplicate, Paste here, order, grouping, and Delete. Right-click empty paper to paste at that point or add text or a sticky note. Ctrl+C/X/V work on selected canvas objects, including copying from one page/tab and pasting into the active page; paste text or an image from another app to insert it. Text editing inside a note keeps its normal shortcuts. Use Ctrl+Z/Y for undo/redo on the active page only and Shift-click for multiple selection. Rich text has its own editor undo while focused.
 - Use **Paper** on each page to choose Blank, Dots, Grid, or Lines. New pages start blank; existing workspaces keep their dotted pages when upgraded. The paper style is saved with the page and follows pan and zoom.
 - The window opens maximized. In split view, the center divider resizes the two editor groups. The full screen control offers the current tab or both tabs side by side; **Tools** reveals the toolbar in that mode, and **Exit full screen** returns to the notebook layout.
-- Open **Settings** from the gear at the bottom of the activity rail to choose Classic Light, Midnight, Warm Paper, or Sage. The choice is saved on this machine. Themes change the workspace chrome while page paper stays light for existing ink and embedded documents.
+- Open **Settings** from the gear at the bottom of the activity rail to choose a theme or set separate workspace, accent, and page colors. Workspace and accent choices are saved on this machine; page color is saved with the current canvas page.
 - The single **Export** menu offers a workspace backup ZIP (SQLite database and original assets) and a print dialog for the current view, where you can save a PDF. Pending canvas edits are saved before a backup starts and when the window closes. Test restores by extracting the ZIP into an empty workspace directory with the app closed. Exporting the entire infinite canvas across PDF pages remains future work.
 
 ## Extensions
@@ -41,8 +41,8 @@ Installed extensions live in the workspace's `extensions/` directory. The Extens
 
 ## Current limits and testing
 
-Windows and Linux installers and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The download page selects the latest published release; earlier releases used Electron.
+Windows and Linux installers and in-app updates are documented in [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md). The download page selects the latest published release.
 
 Full PDF document tabs can scroll through the complete file and keep only nearby page canvases mounted; canvas PDF previews and annotation printouts display the first 50 pages. XLSX previews show up to 200 rows and 30 cells per sheet; PPTX shows text and links rather than the full slide design. DOCX previews reflect the built-in renderer and may differ from Word pagination. Audio/video playback depends on Chromium's codec support; **Open original** uses the default local app. Link support depends on each previewer and should be checked against real documents. Pages and assets are local and originals are stored byte-for-byte. Search, OCR, sync, and account support are outside phase 1.
 
-The HP Envy pen was checked with dense ink and a large PDF in the Ink Lab; pan and zoom improved after rendering changes. Long stress and input-latency measurements remain open. See the [Tauri v2 plan](docs/TAURI_PLAN.md), the [historical Electron plan](docs/PLAN.md), and [docs/VERSIONS.md](docs/VERSIONS.md) for version checks.
+The HP Envy pen was checked with dense ink and a large PDF in the Ink Lab; pan and zoom improved after rendering changes. Long stress and input-latency measurements remain open. See the [Tauri plan](docs/TAURI_PLAN.md) for remaining work.

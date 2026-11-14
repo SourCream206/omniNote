@@ -1,6 +1,6 @@
 # Proposed phase 1 plan: Tauri v2
 
-**Status: Tauri desktop integration built; signed Windows and Linux v0.1.1 release published.** An installed Linux smoke test and a version-to-version Tauri update test remain open. This is a fresh Tauri app with no Electron user-data migration requirement. Reuse React, TypeScript, tests, document fixtures, and proven interaction patterns from the Electron app. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
+**Status: Tauri desktop integration and signed Windows and Linux releases are published.** An installed Linux smoke test and a version-to-version Tauri update test remain open. Windows and the owner's touchscreen HP Envy pen are first. Keep macOS/Linux possible and the data format usable by later Android/iOS apps; do not promise identical desktop/mobile file pickers.
 
 ## Scope and architecture
 
@@ -8,7 +8,7 @@ Keep nested notebook/folder/section/page organization, infinite canvas, vector i
 
 Start at a welcome screen with **Open Folder**, **New Workspace**, and recent workspaces. Reopen the last workspace if available. If moved, missing, locked, or read-only, offer relocation, read-only viewing when safe, or another folder. Suggest the OS Documents directory via Tauri path APIs for new workspaces, but never force it. App-local settings contain only recent paths and window state; workspace settings live with the workspace.
 
-One build-time product metadata file supplies display name, bundle ID, default workspace extension, and URL protocol to all build configs. A rename should edit that file once, but changing an already shipped bundle ID or protocol still needs an installer/updater transition. Keep `omniNote` as a temporary identity in the current Electron product only; do not hardcode it in the fresh app's business logic.
+One build-time product metadata file should supply display name, bundle ID, default workspace extension, and URL protocol to all build configs. Changing an already shipped bundle ID or protocol still needs an installer/updater transition. Keep the working name out of business logic where possible.
 
 ## Portable workspace
 
@@ -84,7 +84,7 @@ Each milestone is built only after the previous gate passes and is handed off wi
 
 ## Remaining risks and naming
 
-- The HP Envy pen may map buttons/palm input differently from Electron. M0 decides based on measurements.
+- The HP Envy pen may map buttons and palm input differently across operating systems. M0 decides based on measurements.
 - Two thousand objects plus textbooks require virtualization and cache eviction; memory and PDF fidelity are separate gates.
 - Live cloud-folder sync can race even with rollback journaling. Phase 1 supports closed-workspace movement and backups.
 - Extensions can abuse granted access or exhaust resources; broker limits and owner review reduce but do not remove risk.

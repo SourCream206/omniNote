@@ -36,6 +36,6 @@ The proposed 60 Hz gate is p95 contact-to-visible ink ≤50 ms, p95 active-ink f
 - Completed ink is painted on a separate canvas; active ink repaints only its overlay. Pan and zoom use a temporary composited transform, then repaint the vectors when movement settles. The worker path appends a new stroke without copying the entire scene on each pen lift.
 - The generated PDF is 300 pages, and page 300 renders alongside dense ink. Only the selected page is mounted to a canvas.
 - Live metrics compare main and worker draw cost. The short mouse runs so far are functional checks, not a repeatable pen benchmark or a pass result.
-- TypeScript/Vite build, native `cargo check`, and the existing Electron regression suite pass.
+- TypeScript/Vite build and native `cargo check` pass; run the repository tests for editor and distribution checks.
 
 **Still required for M0:** HP Envy stylus and palm test, contact-to-visible video timing, a 20-minute stress run, and a decision on whether the worker path improves the actual pen experience.

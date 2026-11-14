@@ -12,6 +12,6 @@
     "allowSyntheticDefaultImports": true,
     "types": ["vite/client"]
   },
-  "include": ["app/**/*.ts", "app/**/*.tsx", "vite.config.mts"]
+  "include": ["app/**/*.ts", "app/**/*.tsx", "vite.tauri.config.mts"]
 }
 

@@ -1,19 +1,10 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertReleaseConfig, githubRepository, hasUpdateSource } = require('../electron/distribution.cjs');
-
-assert.throws(() => assertReleaseConfig({ marketplaceUrl: '', updateUrl: '' }), /updateUrl/);
-assert.throws(() => assertReleaseConfig({ marketplaceUrl: 'http://example.com/catalog.json', updateUrl: 'https://updates.example.com/' }), /marketplaceUrl/);
-assert.throws(() => assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', updateUrl: 'https://example.invalid/updates/' }), /updateUrl/);
-assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', updateUrl: 'https://updates.example.com/' }), { marketplaceUrl: 'https://extensions.example.com/catalog.json', updateUrl: 'https://updates.example.com/' });
-assert.equal(assertReleaseConfig({ marketplaceUrl: '', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
-assert.deepEqual(githubRepository('SourCream206/omniNote'), { owner: 'SourCream206', repo: 'omniNote' });
-assert.equal(githubRepository('https://github.com/SourCream206/omniNote'), null);
-assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote' }), true);
-assert.equal(hasUpdateSource({ githubRepository: 'SourCream206/omniNote', githubPrivate: true }), true);
-assert.deepEqual(assertReleaseConfig({ marketplaceUrl: 'https://extensions.example.com/catalog.json', githubRepository: 'SourCream206/omniNote' }).githubRepository, 'SourCream206/omniNote');
+const distribution = require('../distribution.json');
+assert.equal(new URL(distribution.marketplaceUrl).protocol, 'https:');
 const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
+assert.equal(tauri.plugins.updater.endpoints[0], 'https://github.com/SourCream206/omniNote/releases/latest/download/latest.json');
 assert.equal(tauri.app.windows[0].dragDropEnabled, false, 'HTML file drops must reach the canvas and explorer');
 const linuxTauri = require('../tauri-v2/src-tauri/tauri.linux.conf.json');
 assert.equal(linuxTauri.mainBinaryName, tauri.productName, 'Linux binary name must match the desktop launcher name');

@@ -1,6 +1,4 @@
 node_modules/
-dist/
-dist-ui/
 dist-tauri/
 *.log
 .env
