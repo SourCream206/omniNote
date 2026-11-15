@@ -124,6 +124,32 @@ jobs:
     needs: [desktop, arch]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --prefix tauri-v2
+      - name: Sign Arch updater package and add its manifest target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          gh release download "$GITHUB_REF_NAME" --pattern '*.pkg.tar.zst' --pattern latest.json --dir "$RUNNER_TEMP"
+          package="$(find "$RUNNER_TEMP" -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)"
+          test -n "$package"
+          version="${GITHUB_REF_NAME#v}"
+          npm --prefix tauri-v2 run tauri -- signer sign --app-version "$version" "$package"
+          test -s "$package.sig"
+          jq --arg url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/$(basename "$package")" \
+             --arg signature "$(cat "$package.sig")" \
+             '.platforms["linux-x86_64-arch"] = {url: $url, signature: $signature}' \
+             "$RUNNER_TEMP/latest.json" > "$RUNNER_TEMP/latest.updated.json"
+          mv "$RUNNER_TEMP/latest.updated.json" "$RUNNER_TEMP/latest.json"
+          gh release upload "$GITHUB_REF_NAME" "$package.sig" "$RUNNER_TEMP/latest.json" --clobber
       - name: Verify signed updater assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -135,8 +161,9 @@ jobs:
           grep -Eq '\.exe\.sig$' "$RUNNER_TEMP/assets.txt"
           grep -Eq '\.AppImage$' "$RUNNER_TEMP/assets.txt"
           grep -Eq '\.pkg\.tar\.zst$' "$RUNNER_TEMP/assets.txt"
-          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir "$RUNNER_TEMP"
-          jq -e '(.platforms | keys | any(startswith("windows"))) and (.platforms | keys | any(startswith("linux")))' "$RUNNER_TEMP/latest.json"
+          grep -Eq '\.pkg\.tar\.zst\.sig$' "$RUNNER_TEMP/assets.txt"
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir "$RUNNER_TEMP" --clobber
+          jq -e '(.platforms | keys | any(startswith("windows"))) and (.platforms | keys | any(startswith("linux"))) and (.platforms["linux-x86_64-arch"].signature | length > 0)' "$RUNNER_TEMP/latest.json"
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}

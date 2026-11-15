@@ -5,6 +5,7 @@ const distribution = require('../distribution.json');
 assert.equal(new URL(distribution.marketplaceUrl).protocol, 'https:');
 const tauri = require('../tauri-v2/src-tauri/tauri.conf.json');
 assert.equal(tauri.plugins.updater.endpoints[0], 'https://github.com/SourCream206/omniNote/releases/latest/download/latest.json');
+assert.equal(tauri.plugins.updater.requireSignedVersion, true, 'updates must bind the signed package to its announced version');
 assert.equal(tauri.app.windows[0].dragDropEnabled, false, 'HTML file drops must reach the canvas and explorer');
 const linuxTauri = require('../tauri-v2/src-tauri/tauri.linux.conf.json');
 assert.equal(linuxTauri.mainBinaryName, tauri.productName, 'Linux binary name must match the desktop launcher name');

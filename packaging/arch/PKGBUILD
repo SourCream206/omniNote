@@ -6,6 +6,7 @@ arch=('x86_64')
 url='https://github.com/SourCream206/omniNote'
 license=('LicenseRef-Proprietary')
 depends=('cairo' 'desktop-file-utils' 'gdk-pixbuf2' 'glib2' 'gtk3' 'hicolor-icon-theme' 'libayatana-appindicator' 'libsoup3' 'pango' 'webkit2gtk-4.1')
+optdepends=('polkit: authenticate in-app updates')
 provides=('omninote')
 conflicts=('omninote')
 options=('!strip' '!debug')
