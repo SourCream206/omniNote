@@ -4,6 +4,8 @@
 
 On Arch Linux, download the `.pkg.tar.zst` file and install it with `sudo pacman -U ./omninote-bin-*.pkg.tar.zst`.
 
+On Linux virtual machines, omniNote uses WebKitGTK's compatibility renderer to prevent blank or flashing canvas areas. If detection misses your VM, launch with `OMNINOTE_GRAPHICS_COMPAT=1 omniNote`; use `OMNINOTE_GRAPHICS_COMPAT=0 omniNote` to keep the normal renderer.
+
 A local-first desktop notebook with nested folders, an infinite canvas, vector ink, embedded original documents, and extensions. The current desktop build uses Tauri 2, React, TypeScript, Rust, and SQLite. No account or sync service is involved.
 
 ## Run

@@ -12,6 +12,8 @@ use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 mod marketplace;
 mod updates;
+#[cfg(target_os = "linux")]
+mod linux_graphics;
 
 struct WorkspaceState(Mutex<Workspace>);
 
@@ -292,6 +294,8 @@ fn open_workspace_at(local: &Path, previous: &Path) -> Result<Workspace, Box<dyn
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_graphics::configure();
     let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

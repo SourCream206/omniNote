@@ -13,3 +13,8 @@ export function visiblePdfPages(slots: ArrayLike<{ getBoundingClientRect(): { to
   }
   return visible;
 }
+
+export function pdfPrintoutHeight(width: number, pageRatios: number[]): number {
+  const pageWidth = Math.max(200, width - 24);
+  return 16 + pageRatios.reduce((height, ratio) => height + Math.ceil(pageWidth * ratio) + 8, 0);
+}

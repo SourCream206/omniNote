@@ -111,9 +111,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .tool-group button.active { background:#eaf1f9; color:var(--ui-accent); box-shadow:none; }
 .extension-command { background:#f5f8fc; color:var(--ui-accent); border:1px solid #e2eaf4; }
 .canvas-viewport { background-color:#fff; background-image:none; }
-.canvas-viewport[data-paper=dots] { background-image:radial-gradient(#d9e1e9 1px,transparent 1px); }
-.canvas-viewport[data-paper=grid] { background-image:linear-gradient(to right,#e5ebf1 1px,transparent 1px),linear-gradient(to bottom,#e5ebf1 1px,transparent 1px); }
-.canvas-viewport[data-paper=lines] { background-image:linear-gradient(to bottom,transparent calc(100% - 1px),#dfe6ee calc(100% - 1px)); }
 .canvas-object.object-text { box-shadow:none; }
 .canvas-zoom { border:1px solid #e1e6ed; box-shadow:0 2px 7px #1b2d4b12; }
 .canvas-zoom button:hover { color:var(--ui-accent); background:#f2f6fb; }
@@ -235,6 +232,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [role=treeitem]
 .canvas-object.object-document.printout-docx { border:0; box-shadow:none; background:transparent; }
 .document-printout .document-content { overflow:visible; background:transparent; }
 .document-printout .pdf-content { height:auto; overflow:visible; padding:8px; }
+.document-printout .pdf-page-slot { margin:0 auto 8px; }
+.document-printout .pdf-page-slot .react-pdf__Page { margin:0 auto; }
 
 /* Workspace color themes. */
 :root[data-theme=classic] { --ui-hover:#f2f6fb; --ui-rail:#f4f6f8; --ui-input:#fff; --ui-paper:#fff; --ui-paper-line:#dfe6ee; --ui-accent-fill:#315b93; --ui-shadow:#1e345b24; }
@@ -271,9 +270,10 @@ body { color:var(--ui-text); background:var(--ui-bg); }
   .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: rgb(0, 0, 0)"],
   .canvas-viewport[data-dark-paper=true] .object-text:not(.boxed-note) .rich-content [style*="color: #000"] { color:#182334 !important; }
 }
-.canvas-viewport[data-paper=dots] { background-image:radial-gradient(var(--ui-paper-line) 1px,transparent 1px); }
-.canvas-viewport[data-paper=grid] { background-image:linear-gradient(to right,var(--ui-paper-line) 1px,transparent 1px),linear-gradient(to bottom,var(--ui-paper-line) 1px,transparent 1px); }
-.canvas-viewport[data-paper=lines] { background-image:linear-gradient(to bottom,transparent calc(100% - 1px),var(--ui-paper-line) calc(100% - 1px)); }
+.paper-pattern { position:absolute; inset:-132px; pointer-events:none; background-position:132px 132px; will-change:transform; }
+.paper-pattern.paper-dots { background-image:radial-gradient(var(--ui-paper-line) 1px,transparent 1px); }
+.paper-pattern.paper-grid { background-image:linear-gradient(to right,var(--ui-paper-line) 1px,transparent 1px),linear-gradient(to bottom,var(--ui-paper-line) 1px,transparent 1px); }
+.paper-pattern.paper-lines { background-image:linear-gradient(to bottom,transparent calc(100% - 1px),var(--ui-paper-line) calc(100% - 1px)); }
 .tool-group button, .rich-toolbar button, .header-button, .page-actions button, .focus-controls button { color:var(--ui-text); }
 .tool-group button:hover, .rich-toolbar button:hover:not(:disabled), .header-button:hover, .page-actions button:hover, .focus-controls button:hover { background:var(--ui-hover); color:var(--ui-accent); border-color:var(--ui-line); }
 .tool-group button.active { background:var(--ui-selected); color:var(--ui-accent); }

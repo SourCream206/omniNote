@@ -1,33 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import DOMPurify from 'dompurify';
 import { LoaderCircle } from 'lucide-react';
-import type { Asset, CanvasObject, ExtensionInfo } from './types';
+import type { Asset, Camera, CanvasObject, ExtensionInfo } from './types';
 import ExtensionFrame from './ExtensionFrame';
-import { visiblePdfPages } from './pdfVisibility';
+import { pdfPrintoutHeight, visiblePdfPages } from './pdfVisibility';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
-export async function pdfPrintoutHeight(assetId: string, width: number) {
-  const loading = pdfjs.getDocument({ data: new Uint8Array(await window.whiteboard.readAsset(assetId)) });
-  try {
-    const pdf = await loading.promise;
-    let height = 16;
-    for (let pageNumber = 1; pageNumber <= Math.min(pdf.numPages, 50); pageNumber++) {
-      const page = await pdf.getPage(pageNumber);
-      const size = page.getViewport({ scale: 1 });
-      height += (width - 24) * size.height / size.width + 8;
+type PdfLayoutSource = { numPages: number; getPage(pageNumber: number): Promise<{ getViewport(options: { scale: number }): { width: number; height: number } }> };
+const ratioCache = new Map<string, Promise<number[]>>();
+function pageRatios(assetId: string, pdf: PdfLayoutSource): Promise<number[]> {
+  const cached = ratioCache.get(assetId);
+  if (cached) return cached;
+  const pending = (async () => {
+    const ratios: number[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const size = (await pdf.getPage(pageNumber)).getViewport({ scale: 1 });
+      ratios.push(size.height / size.width);
     }
-    return height;
-  } finally { await loading.destroy(); }
+    return ratios;
+  })();
+  ratioCache.set(assetId, pending);
+  if (ratioCache.size > 8) ratioCache.delete(ratioCache.keys().next().value!);
+  pending.catch(() => ratioCache.delete(assetId));
+  return pending;
 }
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const frameCsp = "default-src 'none'; style-src 'unsafe-inline'; img-src blob: data:; font-src blob: data:; script-src 'none'; connect-src 'none'; base-uri 'none'";
 const htmlDocument = (body: string, styles = '') => `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${frameCsp}"><style>html,body{margin:0;padding:8px;font:13px/1.45 system-ui,sans-serif;color:#253454;background:white}a{color:#285fc0;text-decoration:underline}table{border-collapse:collapse}td,th{border:1px solid #dce3ee;padding:3px 6px}img{max-width:100%}</style>${styles}</head><body>${body}</body></html>`;
 
-export default function DocumentPreview({ object, asset, viewer, interactive, fullDocument = false, onContentSize, onPreviewFailure, onError }: { object: CanvasObject; asset?: Asset; viewer?: { extension: ExtensionInfo; entry: string }; interactive: boolean; fullDocument?: boolean; onContentSize?(size: { width: number; height: number }): void; onPreviewFailure(): void; onError(error: unknown): void }) {
+export default function DocumentPreview({ object, asset, viewer, interactive, fullDocument = false, camera, onContentSize, onPreviewFailure, onError }: { object: CanvasObject; asset?: Asset; viewer?: { extension: ExtensionInfo; entry: string }; interactive: boolean; fullDocument?: boolean; camera?: Camera; onContentSize?(size: { width: number; height: number }): void; onPreviewFailure(): void; onError(error: unknown): void }) {
   const format = (object.payload as { format: string }).format;
   const assetId = (object.payload as { assetId: string }).assetId;
   const printout = (object.payload as { presentation?: string }).presentation === 'printout';
@@ -35,35 +40,64 @@ export default function DocumentPreview({ object, asset, viewer, interactive, fu
   const [html, setHtml] = useState('');
   const [error, setError] = useState('');
   const [pdfPages, setPdfPages] = useState(0);
+  const [ratios, setRatios] = useState<number[]>([]);
   const pdfHost = useRef<HTMLDivElement>(null);
+  const pdfDocument = useRef<PdfLayoutSource | null>(null);
+  const pageSlots = useRef<HTMLElement[]>([]);
   const visibilityFrame = useRef<number | null>(null);
   const [visiblePages, setVisiblePages] = useState<Set<number>>(() => new Set([1, 2]));
   const iframe = useRef<HTMLIFrameElement>(null);
   const file = useMemo(() => bytes ? { data: bytes } : null, [bytes]);
+  const onContentSizeRef = useRef(onContentSize);
+  onContentSizeRef.current = onContentSize;
 
-  const updateVisiblePages = () => {
-    if (!fullDocument || visibilityFrame.current !== null) return;
+  const updateVisiblePages = useCallback(() => {
+    if (visibilityFrame.current !== null) return;
     visibilityFrame.current = requestAnimationFrame(() => {
       visibilityFrame.current = null;
       const container = pdfHost.current;
       if (!container) return;
-      const outer = container.parentElement?.getBoundingClientRect();
+      const viewport = printout ? container.closest('.canvas-viewport') : container.parentElement;
+      const outer = viewport?.getBoundingClientRect();
       const inner = container.getBoundingClientRect();
       const top = Math.max(inner.top, outer?.top ?? inner.top) - 900;
       const bottom = Math.min(inner.bottom, outer?.bottom ?? inner.bottom) + 900;
-      const slots = container.querySelectorAll<HTMLElement>('.pdf-page-slot');
-      const next = visiblePdfPages(slots, top, bottom);
+      if (pageSlots.current.length !== pdfPages) pageSlots.current = Array.from(container.querySelectorAll<HTMLElement>('.pdf-page-slot'));
+      const next = visiblePdfPages(pageSlots.current, top, bottom);
       setVisiblePages((current) => current.size === next.size && [...next].every((page) => current.has(page)) ? current : next);
     });
-  };
+  }, [pdfPages, printout]);
+
+  const pdfPageElements = useMemo(() => Array.from({ length: pdfPages }, (_, index) =>
+    <LazyPdfPage key={index} pageNumber={index + 1} width={Math.max(200, object.width - (printout ? 24 : 32))} initialRatio={ratios[index] ?? 1.3} printout={printout} interactive={interactive} visible={visiblePages.has(index + 1)} onSizeChange={updateVisiblePages} />
+  ), [pdfPages, object.width, printout, ratios, interactive, visiblePages, updateVisiblePages]);
 
   useEffect(() => {
-    if (pdfPages && fullDocument) updateVisiblePages();
+    if (pdfPages) updateVisiblePages();
     return () => { if (visibilityFrame.current !== null) cancelAnimationFrame(visibilityFrame.current); visibilityFrame.current = null; };
-  }, [pdfPages, fullDocument, object.width]);
+  }, [pdfPages, fullDocument, object.width, object.height, camera?.x, camera?.y, camera?.zoom, ratios]);
+
+  useEffect(() => {
+    if (!printout || !pdfPages || !pdfDocument.current) return;
+    let live = true;
+    pageRatios(assetId, pdfDocument.current).then((value) => { if (live) setRatios(value); }).catch((reason) => { if (live) setError(String(reason)); });
+    return () => { live = false; };
+  }, [assetId, pdfPages, printout]);
+
+  useEffect(() => {
+    if (printout && pdfPages) {
+      const pageSizes = ratios.length === pdfPages ? ratios : Array(pdfPages).fill(1.3);
+      onContentSizeRef.current?.({ width: object.width, height: pdfPrintoutHeight(object.width, pageSizes) });
+    }
+  }, [printout, ratios, pdfPages, object.width]);
 
   useEffect(() => {
     let live = true;
+    pageSlots.current = [];
+    pdfDocument.current = null;
+    setPdfPages(0);
+    setRatios([]);
+    setBytes(null);
     window.whiteboard.readAsset(assetId).then((data) => { if (live) setBytes(new Uint8Array(data)); }).catch((reason) => { if (live) setError(String(reason)); });
     return () => { live = false; };
   }, [assetId]);
@@ -116,14 +150,14 @@ export default function DocumentPreview({ object, asset, viewer, interactive, fu
 
   if (error) return null;
   if (viewer) return <div className={`document-body ${printout ? 'document-printout' : ''}`} onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}><ExtensionFrame extension={viewer.extension} entry={viewer.entry} kind="document" data={{ name: asset?.original_name, format }} bytes={bytes} interactive={interactive} onError={onError} /></div>;
-  return <div className={`document-body ${printout ? 'document-printout' : ''}`} onScrollCapture={fullDocument ? updateVisiblePages : undefined} onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}>
+  return <div className={`document-body ${printout ? 'document-printout' : ''}`} onScrollCapture={updateVisiblePages} onPointerDown={(event) => { if (interactive) event.stopPropagation(); }}>
     <div className="document-content">
       {format === 'pdf' && file ? <div ref={pdfHost} className={`pdf-content ${fullDocument ? 'full-document' : ''}`} onClickCapture={(event) => {
         const anchor = (event.target as HTMLElement).closest('a[href]') as HTMLAnchorElement | null;
         if (!anchor) return;
         const href = anchor.getAttribute('href') || '';
         if (/^https?:|^mailto:/i.test(href)) { event.preventDefault(); event.stopPropagation(); window.whiteboard.openExternal(href).catch(onError); }
-      }}><Document file={file} suspense={false} onLoadSuccess={(pdf) => setPdfPages(pdf.numPages)} onLoadError={(reason) => setError(reason.message)} loading={<Loading />}>{Array.from({ length: fullDocument ? pdfPages : Math.min(pdfPages, 50) }, (_, index) => fullDocument ? <LazyPdfPage key={index} pageNumber={index + 1} width={Math.max(200, object.width - 32)} visible={visiblePages.has(index + 1)} onSizeChange={updateVisiblePages} /> : <Page key={index} pageNumber={index + 1} width={Math.max(200, object.width - (printout ? 24 : 32))} renderTextLayer={!printout || interactive} renderAnnotationLayer={!printout || interactive} suspense={false} />)}</Document>{!fullDocument && pdfPages > 50 && <p>First 50 pages shown. Open original for the rest.</p>}</div> : format === 'pdf' ? <Loading /> : html ? <iframe ref={iframe} title={`${format} preview`} srcDoc={html} sandbox="allow-same-origin" onLoad={() => { if (printout && format === 'docx') requestAnimationFrame(() => { const frame = iframe.current?.contentDocument; const wrapper = frame?.querySelector('.docx-wrapper'); const sheet = wrapper?.querySelector('section'); if (frame) onContentSize?.({ width: Math.max(200, Math.ceil(sheet?.getBoundingClientRect().width || frame.body.scrollWidth) + 16), height: Math.max(150, (wrapper?.scrollHeight || frame.body.scrollHeight) + 16) }); }); }} /> : <Loading />}
+      }}><Document file={file} suspense={false} onLoadSuccess={(pdf) => { pdfDocument.current = pdf; setPdfPages(pdf.numPages); }} onLoadError={(reason) => setError(reason.message)} loading={<Loading />}>{pdfPageElements}</Document></div> : format === 'pdf' ? <Loading /> : html ? <iframe ref={iframe} title={`${format} preview`} srcDoc={html} sandbox="allow-same-origin" onLoad={() => { if (printout && format === 'docx') requestAnimationFrame(() => { const frame = iframe.current?.contentDocument; const wrapper = frame?.querySelector('.docx-wrapper'); const sheet = wrapper?.querySelector('section'); if (frame) onContentSize?.({ width: Math.max(200, Math.ceil(sheet?.getBoundingClientRect().width || frame.body.scrollWidth) + 16), height: Math.max(150, (wrapper?.scrollHeight || frame.body.scrollHeight) + 16) }); }); }} /> : <Loading />}
       {!interactive && <div className="document-shield" aria-hidden="true" />}
     </div>
   </div>;
@@ -131,11 +165,11 @@ export default function DocumentPreview({ object, asset, viewer, interactive, fu
 
 function Loading() { return <div className="document-loading"><LoaderCircle size={19} className="spin" /> Loading preview…</div>; }
 
-function LazyPdfPage({ pageNumber, width, visible, onSizeChange }: { pageNumber: number; width: number; visible: boolean; onSizeChange(): void }) {
+function LazyPdfPage({ pageNumber, width, initialRatio, printout, interactive, visible, onSizeChange }: { pageNumber: number; width: number; initialRatio: number; printout: boolean; interactive: boolean; visible: boolean; onSizeChange(): void }) {
   const host = useRef<HTMLDivElement>(null);
-  const [aspectRatio, setAspectRatio] = useState(1.3);
-  return <div ref={host} className="pdf-page-slot" style={{ minHeight: Math.round(width * aspectRatio) }}>{visible && <Page pageNumber={pageNumber} width={width} renderTextLayer renderAnnotationLayer suspense={false} onRenderSuccess={() => {
-    const pageHeight = host.current?.querySelector('.react-pdf__Page')?.getBoundingClientRect().height;
+  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  return <div ref={host} className="pdf-page-slot" style={{ minHeight: Math.ceil(width * (aspectRatio ?? initialRatio)) }}>{visible && <Page pageNumber={pageNumber} width={width} renderTextLayer={!printout || interactive} renderAnnotationLayer={!printout || interactive} suspense={false} onRenderSuccess={() => {
+    const pageHeight = (host.current?.querySelector('.react-pdf__Page') as HTMLElement | null)?.offsetHeight;
     if (pageHeight) { setAspectRatio(pageHeight / width); onSizeChange(); }
   }} />}</div>;
 }
@@ -181,7 +215,7 @@ async function renderPptx(bytes: Uint8Array) {
   const zip = await JSZip.loadAsync(bytes);
   const slides = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
   const html: string[] = [];
-  for (let index = 0; index < Math.min(slides.length, 80); index++) {
+  for (let index = 0; index < slides.length; index++) {
     const slidePath = slides[index];
     const xml = new DOMParser().parseFromString(await zip.file(slidePath)!.async('text'), 'application/xml');
     const relPath = slidePath.replace('/slide', '/_rels/slide') + '.rels';
