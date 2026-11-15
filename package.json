@@ -1,7 +1,7 @@
 {
   "name": "omninote",
   "private": true,
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Local-first infinite canvas notebook app",
   "homepage": "https://sourcream206.github.io/omniNote/",
   "repository": "https://github.com/SourCream206/omniNote",
