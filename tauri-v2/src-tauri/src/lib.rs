@@ -202,7 +202,15 @@ fn reveal_node(app: tauri::AppHandle, state: State<'_, WorkspaceState>, node_id:
 fn open_original(app: tauri::AppHandle, state: State<'_, WorkspaceState>, asset_id: String) -> Result<(), String> {
     let path = state.0.lock().map_err(|_| "Workspace lock failed")?
         .asset_path(parse_id(&asset_id)?).map_err(|error| error.to_string())?;
+    if !safe_to_open_original(&path) {
+        return Err("Executable attachments cannot be launched from omniNote. Reveal the file in the workspace to inspect it.".into());
+    }
     app.opener().open_path(path.to_str().ok_or("Asset path is not Unicode")?, None::<&str>).map_err(|error| error.to_string())
+}
+
+fn safe_to_open_original(path: &Path) -> bool {
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    !matches!(extension.as_str(), "appimage" | "appref-ms" | "bat" | "cmd" | "com" | "command" | "cpl" | "desktop" | "exe" | "hta" | "jar" | "js" | "jse" | "lnk" | "msi" | "msp" | "pif" | "ps1" | "py" | "reg" | "run" | "scr" | "sh" | "url" | "vbe" | "vbs" | "wsf" | "wsh")
 }
 
 #[tauri::command]
@@ -308,6 +316,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_open_blocks_launchable_attachments() {
+        for name in ["tool.EXE", "setup.msi", "start.desktop", "update.AppImage", "script.sh"] {
+            assert!(!safe_to_open_original(Path::new(name)), "{name}");
+        }
+        for name in ["notes.pdf", "lecture.docx", "recording.mp4"] {
+            assert!(safe_to_open_original(Path::new(name)), "{name}");
+        }
+    }
 
     #[test]
     fn moves_existing_workspace_to_platform_local_directory_without_deleting_original() {
