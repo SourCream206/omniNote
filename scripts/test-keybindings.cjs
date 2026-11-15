@@ -6,6 +6,8 @@ assert.equal(eventToShortcut(key('f', { ctrlKey: true, shiftKey: true })), 'Mod+
 assert.equal(commandForEvent(key('t', { ctrlKey: true }), DEFAULT_BINDINGS), 'tab.open');
 assert.equal(commandForEvent(key('f', { ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS), 'search.notebook');
 assert.equal(commandForEvent(key('p'), DEFAULT_BINDINGS), 'tool.pen');
+assert.equal(commandForEvent(key('c', { ctrlKey: true }), DEFAULT_BINDINGS), 'edit.copy');
+assert.equal(commandForEvent(key('v', { ctrlKey: true }), DEFAULT_BINDINGS), 'edit.paste');
 assert.equal(commandForEvent(key('P', { shiftKey: true }), DEFAULT_BINDINGS), null);
 assert.equal(bindingConflict(DEFAULT_BINDINGS, 'tool.pen', 'T'), 'tool.text');
 assert.equal(bindingConflict(DEFAULT_BINDINGS, 'tool.pen', 'Mod+Z'), 'reserved');

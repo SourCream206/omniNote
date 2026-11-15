@@ -6,6 +6,8 @@ export const keybindingCommands = [
   { id: 'page.new', label: 'New page', group: 'Workspace' },
   { id: 'search.tab', label: 'Search current tab', group: 'Search' },
   { id: 'search.notebook', label: 'Search notebook', group: 'Search' },
+  { id: 'edit.copy', label: 'Copy selected objects', group: 'Edit' },
+  { id: 'edit.paste', label: 'Paste on page', group: 'Edit' },
   { id: 'tool.select', label: 'Select', group: 'Tools' },
   { id: 'tool.text', label: 'Text', group: 'Tools' },
   { id: 'tool.pen', label: 'Pen', group: 'Tools' },
@@ -20,13 +22,14 @@ export type Keybindings = Record<KeybindingCommand, string>;
 export const DEFAULT_BINDINGS: Keybindings = {
   'tab.open': 'Mod+T', 'tab.close': 'Mod+W', 'page.new': 'Mod+N',
   'search.tab': 'Mod+F', 'search.notebook': 'Mod+Shift+F',
+  'edit.copy': 'Mod+C', 'edit.paste': 'Mod+V',
   'tool.select': 'V', 'tool.text': 'T', 'tool.pen': 'P',
   'tool.highlighter': 'H', 'tool.eraser': 'E', 'tool.lasso': 'L', 'tool.hand': 'G',
 };
 
 type KeyEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'> & { getModifierState?(key: string): boolean };
 const allowedKey = /^(?:[A-Z0-9]|F(?:[1-9]|1[0-2])|[./,;\[\]\-=])$/;
-const reserved = new Set(['Mod+Z', 'Mod+Shift+Z', 'Mod+Y', 'Mod+C', 'Mod+X', 'Mod+V', 'Mod+G', 'Mod+R', 'Space', 'Escape', 'Delete', 'Backspace', 'F5']);
+const reserved = new Set(['Mod+Z', 'Mod+Shift+Z', 'Mod+Y', 'Mod+X', 'Mod+G', 'Mod+R', 'Space', 'Escape', 'Delete', 'Backspace', 'F5']);
 const bindingPattern = /^(?:Mod\+)?(?:Alt\+)?(?:Shift\+)?(?:[A-Z0-9]|F(?:[1-9]|1[0-2])|[./,;\[\]\-=])$/;
 
 export function eventToShortcut(event: KeyEvent): string | null {

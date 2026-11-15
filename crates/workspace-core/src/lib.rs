@@ -346,15 +346,15 @@ impl Workspace {
     }
 
     pub fn create_notebook(&mut self, title: &str) -> Result<Node, WorkspaceError> {
-        self.create_node(None, NodeKind::Notebook, title)
+        self.create_node(None, NodeKind::Notebook, title, false)
     }
 
     pub fn create_folder(&mut self, parent_id: Uuid, title: &str) -> Result<Node, WorkspaceError> {
-        self.create_node(Some(parent_id), NodeKind::Folder, title)
+        self.create_node(Some(parent_id), NodeKind::Folder, title, false)
     }
 
     pub fn create_page(&mut self, parent_id: Uuid, title: &str) -> Result<Node, WorkspaceError> {
-        self.create_node(Some(parent_id), NodeKind::Page, title)
+        self.create_node(Some(parent_id), NodeKind::Page, title, false)
     }
 
     pub fn create_document_page(&mut self, parent_id: Uuid, asset_id: Uuid) -> Result<Node, WorkspaceError> {
@@ -365,15 +365,16 @@ impl Workspace {
         let parent = self.node(parent_id)?;
         if parent.kind == NodeKind::Page { return Err(WorkspaceError::InvalidParent); }
         let parent_path = resolve_directory(&self.root, &parent.relative_path)?;
-        let document_path = parent_path.join(&title);
-        if fs::symlink_metadata(&document_path).is_ok() { return Err(WorkspaceError::NameConflict); }
         let source = self.asset_path(asset_id)?;
-        let page = self.create_page(parent_id, &title)?;
+        let page = self.create_node(Some(parent_id), NodeKind::Page, &title, true)?;
+        let document_path = parent_path.join(&page.title);
         let pointer = self.node_path(page.id)?;
-        let relative_path = format!("{}/{}", parent.relative_path, title);
+        let relative_path = format!("{}/{}", parent.relative_path, page.title);
+        let mut document_created = false;
         let result = (|| -> Result<(), WorkspaceError> {
             let mut original = File::open(source)?;
             let mut output = OpenOptions::new().write(true).create_new(true).open(&document_path)?;
+            document_created = true;
             std::io::copy(&mut original, &mut output)?;
             output.sync_all()?;
             let transaction = self.connection.transaction()?;
@@ -383,7 +384,7 @@ impl Workspace {
             Ok(())
         })();
         if let Err(error) = result {
-            let _ = fs::remove_file(document_path);
+            if document_created { let _ = fs::remove_file(document_path); }
             let _ = self.delete_node(page.id);
             return Err(error);
         }
@@ -716,14 +717,9 @@ impl Workspace {
         parent_id: Option<Uuid>,
         kind: NodeKind,
         title: &str,
+        document: bool,
     ) -> Result<Node, WorkspaceError> {
-        let title = validate_title(title)?;
-        let title_key = title
-            .as_str()
-            .case_fold()
-            .collect::<String>()
-            .nfc()
-            .collect::<String>();
+        let base_title = validate_title(title)?;
         let parent = parent_id.map(|id| id.to_string());
         let parent_path = if kind == NodeKind::Notebook && parent_id.is_none() {
             String::new()
@@ -751,30 +747,34 @@ impl Workspace {
             return Err(WorkspaceError::InvalidParent);
         }
         let parent_directory = resolve_directory(&self.root, &parent_path)?;
-        let filename = if kind == NodeKind::Page {
-            format!("{title}.page")
-        } else {
-            title.clone()
-        };
+        let mut available = None;
+        for number in 0..10_000 {
+            let title = if number == 0 { base_title.clone() } else { numbered_title(&base_title, number, document)? };
+            let title_key = title.as_str().case_fold().collect::<String>().nfc().collect::<String>();
+            let filename = if kind == NodeKind::Page { format!("{title}.page") } else { title.clone() };
+            let occupied_in_db: bool = self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id IS ?1 AND title_key = ?2)",
+                params![parent, title_key], |row| row.get(0),
+            )?;
+            if occupied_in_db { continue; }
+            let occupied_on_disk = |name: &str| -> Result<bool, WorkspaceError> {
+                match fs::symlink_metadata(parent_directory.join(name)) {
+                    Ok(_) => Ok(true),
+                    Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+                    Err(error) => Err(error.into()),
+                }
+            };
+            if occupied_on_disk(&filename)? || document && occupied_on_disk(&title)? { continue; }
+            available = Some((title, title_key, filename));
+            break;
+        }
+        let (title, title_key, filename) = available.ok_or(WorkspaceError::NameConflict)?;
         let relative_path = if parent_path.is_empty() {
             filename.clone()
         } else {
             format!("{parent_path}/{filename}")
         };
         let target = parent_directory.join(&filename);
-        let exists: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent_id IS ?1 AND title_key = ?2)",
-            params![parent, title_key],
-            |row| row.get(0),
-        )?;
-        let target_occupied = match fs::symlink_metadata(&target) {
-            Ok(_) => true,
-            Err(error) if error.kind() == ErrorKind::NotFound => false,
-            Err(error) => return Err(error.into()),
-        };
-        if exists || target_occupied {
-            return Err(WorkspaceError::NameConflict);
-        }
         let sort_order: i64 = self.connection.query_row(
             "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM nodes WHERE parent_id IS ?1",
             [parent.clone()],
@@ -866,6 +866,20 @@ fn mime_for_name(name: &str) -> &'static str {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         _ => "application/octet-stream",
     }
+}
+
+fn numbered_title(base: &str, number: usize, document: bool) -> Result<String, WorkspaceError> {
+    let suffix = format!("({number})");
+    let (stem, extension) = if document {
+        base.rsplit_once('.')
+            .filter(|(stem, extension)| !stem.is_empty() && !extension.is_empty())
+            .map(|(stem, extension)| (stem, format!(".{extension}")))
+            .unwrap_or((base, String::new()))
+    } else { (base, String::new()) };
+    let limit = 120usize.checked_sub(suffix.chars().count() + extension.chars().count())
+        .ok_or(WorkspaceError::NameConflict)?;
+    let stem = stem.chars().take(limit).collect::<String>();
+    validate_title(&format!("{}{}{}", stem.trim_end_matches('.'), suffix, extension))
 }
 
 fn validate_title(input: &str) -> Result<String, WorkspaceError> {

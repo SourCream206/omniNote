@@ -13,7 +13,8 @@ import DocumentPage from './DocumentPage';
 import SearchPanel from './SearchPanel';
 import NewTabPage from './NewTabPage';
 import KeybindingsSection from './KeybindingsSection';
-import { commandForEvent, DEFAULT_BINDINGS, isTypingTarget, readKeybindings, toolForCommand, type KeybindingCommand } from './keybindings';
+import { commandForEvent, DEFAULT_BINDINGS, eventToShortcut, isTypingTarget, readKeybindings, toolForCommand, type KeybindingCommand } from './keybindings';
+import { readMousePanButton, type MousePanButton } from './mouseControls';
 import type { SearchHit } from './workspaceSearch';
 import { readTheme, themeAccent, themeBackground, themes, type ThemeId } from './theme';
 import type { FullscreenScope } from './FullscreenControl';
@@ -54,6 +55,7 @@ export default function App() {
   const [activePane, setActivePane] = useState<0 | 1>(0);
   const [activeTool, setActiveTool] = useState<CanvasTool>('text');
   const [keybindings, setKeybindings] = useState(readKeybindings);
+  const [mousePanButton, setMousePanButton] = useState(readMousePanButton);
   const [searchMode, setSearchMode] = useState<'tab' | 'notebook'>('tab');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -75,6 +77,10 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeId>(readTheme);
   const [accentColor, setAccentColor] = useState(() => localStorage.getItem('omninote.accentColor') ?? '');
   const [uiColor, setUiColor] = useState(() => localStorage.getItem('omninote.uiColor') ?? '');
+  const [defaultPageColor, setDefaultPageColor] = useState(() => {
+    const saved = localStorage.getItem('omninote.defaultPageColor') ?? '';
+    return /^#[0-9a-f]{6}$/i.test(saved) ? saved : '#ffffff';
+  });
   const [extensions, setExtensions] = useState<ExtensionInfo[]>([]);
   const [focusMode, setFocusMode] = useState(false);
   const [focusScope, setFocusScope] = useState<FullscreenScope>('current');
@@ -133,6 +139,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem('omninote.sidebarWidth', String(sidebarWidth)); }, [sidebarWidth]);
   useEffect(() => { localStorage.setItem('omninote.splitRatio', String(splitRatio)); }, [splitRatio]);
   useEffect(() => { localStorage.setItem('omninote.keybindings', JSON.stringify(keybindings)); }, [keybindings]);
+  useEffect(() => { localStorage.setItem('omninote.mousePanButton', mousePanButton); }, [mousePanButton]);
+  useEffect(() => { localStorage.setItem('omninote.defaultPageColor', defaultPageColor); }, [defaultPageColor]);
   useLayoutEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('omninote.theme', theme); }, [theme]);
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -365,6 +373,10 @@ export default function App() {
     if (title === null) return;
     try {
       const nodeId = await window.whiteboard.createNode(parentId, kind, title);
+      if (kind === 'page' && defaultPageColor !== '#ffffff') {
+        try { await window.whiteboard.setPageColor(nodeId, defaultPageColor); }
+        catch (error) { notifyError(error); }
+      }
       const data = await refresh();
       if (kind === 'page') { openPage(nodeId, parentId); }
       if (kind === 'section') { setSectionId(nodeId); openPage(firstPageIn(data.nodes, nodeId), nodeId); }
@@ -535,8 +547,14 @@ export default function App() {
     const onShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || event.isComposing || dialogRequest || isTypingTarget(event.target)) return;
       if ((event.target as Element | null)?.closest?.('[data-shortcut-capture]')) return;
+      const canvas = activePane === 1 ? splitCanvasRef.current : canvasRef.current;
       const command = commandForEvent(event, keybindings);
-      if (!command) return;
+      if (!command) {
+        if (canvas && keybindings['edit.paste'] !== 'Mod+V' && eventToShortcut(event) === 'Mod+V') {
+          event.preventDefault(); event.stopPropagation();
+        }
+        return;
+      }
       const tool = toolForCommand(command);
       if (tool) {
         if ((event.target as Element | null)?.closest?.('button, a, summary, [role="tab"], [role="treeitem"], [role="menuitem"]')) return;
@@ -550,6 +568,8 @@ export default function App() {
       }
       else if (command === 'search.tab') openSearch('tab');
       else if (command === 'search.notebook') openSearch('notebook');
+      else if (command === 'edit.copy') { if (!canvas?.copySelection()) return; }
+      else if (command === 'edit.paste') { if (!canvas) return; void canvas.pasteClipboard(); }
       event.preventDefault();
       event.stopPropagation();
     };
@@ -582,10 +602,12 @@ export default function App() {
   }
 
   async function changePaperColor(color: string) {
-    if (!activePageId) return;
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return;
+    if (!page || snapshot?.documentPages.some((item) => item.page_id === page.id)) { setDefaultPageColor(color); return; }
     try {
-      await window.whiteboard.setPageColor(activePageId, color);
-      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === activePageId ? { ...row, paper_color: color } : row) } : previous);
+      await window.whiteboard.setPageColor(page.id, color);
+      setDefaultPageColor(color);
+      setSnapshot((previous) => previous ? { ...previous, pages: previous.pages.map((row) => row.id === page.id ? { ...row, paper_color: color } : row) } : previous);
     } catch (error) { notifyError(error); }
   }
 
@@ -661,7 +683,7 @@ export default function App() {
 
   if (!snapshot) return <div className="loading-screen"><BookOpen size={38} /><strong>Opening your workspace…</strong></div>;
   const paperStyle = snapshot.pages.find((row) => row.id === activePageId)?.paper_style ?? 'blank';
-  const paperColor = snapshot.pages.find((row) => row.id === activePageId)?.paper_color ?? '#ffffff';
+  const paperColor = activePageId && !snapshot.documentPages.some((item) => item.page_id === activePageId) ? snapshot.pages.find((row) => row.id === activePageId)?.paper_color ?? defaultPageColor : defaultPageColor;
   const toolbarActions = <>
     {activePageId && snapshot.documentPages.some((item) => item.page_id === activePageId) && annotationPages.has(activePageId) && <button className="header-button" onClick={() => setAnnotationPages((before) => { const next = new Set(before); next.delete(activePageId); return next; })}>View document</button>}
     <div className="export-control" ref={exportRef}><button className="header-button" aria-expanded={exportOpen} onClick={() => setExportOpen((open) => !open)}><Download size={15} /> Export <ChevronDown size={13} /></button>{exportOpen && <div className="export-menu"><button disabled={!page} onClick={() => { setExportOpen(false); window.whiteboard.exportPagePdf().catch(notifyError); }}>Print current view / PDF</button><button onClick={() => { setExportOpen(false); Promise.resolve((activePane === 1 ? splitCanvasRef.current : canvasRef.current)?.flushPendingSave()).then(() => window.whiteboard.exportWorkspace()).catch(notifyError); }}>Workspace backup ZIP</button>{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.exporters ?? []).map((entry) => <button key={entry.command} onClick={() => { setExportOpen(false); runExtension(entry.command); }}>{entry.id}</button>)}</div>}</div>
@@ -673,7 +695,7 @@ export default function App() {
     const documentAssetId = snapshot.documentPages.find((item) => item.page_id === id)?.asset_id;
     const documentAsset = snapshot.assets.find((item) => item.id === documentAssetId);
     return <div className={`editor-pane ${activePane === pane ? 'active' : ''} ${fileDropPane === pane ? 'file-drop-target' : ''} ${tabGhost && tabDrop?.pane === pane && !tabDrop.targetId && !tabDrop.split ? 'drop-pane' : ''}`} data-pane={pane} onPointerDown={() => { setActivePane(pane); if (panePage) setSectionId(panePage.parent_id); }}>
-      {isNewTab(id) ? <NewTabPage snapshot={snapshot} onOpen={openPage} onCreate={() => { const parent = sectionId ?? nodes.find((node) => node.kind === 'notebook')?.id ?? null; if (parent) void createNode('page', parent); else void createNode('notebook', null); }} /> : panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onCameraChange={updateCamera} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
+      {isNewTab(id) ? <NewTabPage snapshot={snapshot} onOpen={openPage} onCreate={() => { const parent = sectionId ?? nodes.find((node) => node.kind === 'notebook')?.id ?? null; if (parent) void createNode('page', parent); else void createNode('notebook', null); }} /> : panePage && documentAsset && !annotationPages.has(panePage.id) ? <DocumentPage key={`${pane}:${panePage.id}`} pageId={panePage.id} asset={documentAsset} extensions={extensions} toolbarTarget={activePane === pane ? toolbarHost : null} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onAnnotate={() => { setActivePane(pane); setAnnotationPages((before) => new Set([...before, panePage.id])); if (!snapshot.objects.some((object) => object.page_id === panePage.id && object.type === 'document')) setPendingAnnotation(panePage.id); }} onError={notifyError} /> : panePage ? <Canvas key={`${pane}:${panePage.id}`} ref={pane === 0 ? canvasRef : splitCanvasRef} page={panePage} row={snapshot.pages.find((row) => row.id === panePage.id)!} initialObjects={snapshot.objects.filter((object) => object.page_id === panePage.id)} assets={snapshot.assets} nodes={nodes} extensions={extensions} tool={activeTool} mousePanButton={mousePanButton} onToolChange={setActiveTool} toolbarActions={activePane === pane ? toolbarActions : undefined} toolbarPortalTarget={toolbarHost} showToolbar={activePane === pane} focusMode={focusMode} splitView={rightTabs.length > 0} onToggleFocus={toggleFocus} onObjectsChange={updatePage} onCameraChange={updateCamera} onNavigatePage={navigatePage} onError={notifyError} onAssetImported={importedAsset} onRunExtension={runExtension} onRequestLink={() => ask('Add web link', 'https://', 'Add link')} /> : <div className="no-page"><Layers3 size={30} /><h2>Open a page</h2><p>Choose one from Explorer or the tabs.</p></div>}
     </div>;
   };
   const renderTabStrip = (pane: 0 | 1) => {
@@ -711,7 +733,7 @@ export default function App() {
         </div>
         <button className="new-page" disabled={!section} onClick={() => section && createNode('page', section.id)}><Plus size={15} /> New page</button>
         {!!extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).length && <div className="sidebar-footer">{extensions.filter((item) => item.enabled).flatMap((item) => item.manifest.contributes.sidebar ?? []).map((entry) => <button key={entry.command} onClick={() => runExtension(entry.command)}><Puzzle size={16} /> {entry.label}</button>)}</div>}
-        </> : activePanel === 'search' ? <SearchPanel snapshot={snapshot} activePageId={isNewTab(activePageId) ? null : activePageId} mode={searchMode} query={searchQuery} focusToken={searchFocusToken} onModeChange={(mode) => { setSearchMode(mode); setSearchQuery(''); setSearchFocusToken((value) => value + 1); }} onQueryChange={setSearchQuery} onOpen={openSearchHit} onClose={() => setActivePanel('explorer')} /> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={(value) => { setTheme(value); setUiColor(''); }} accentColor={accentColor} onAccentChange={setAccentColor} uiColor={uiColor} onUiColorChange={setUiColor} pageColor={paperColor} pageColorEnabled={!!activePageId && !snapshot.documentPages.some((item) => item.page_id === activePageId)} onPageColorChange={(value) => void changePaperColor(value)} keybindings={keybindings} onBindingChange={(command, shortcut) => setKeybindings((before) => ({ ...before, [command]: shortcut }))} onResetBindings={() => setKeybindings({ ...DEFAULT_BINDINGS })} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
+        </> : activePanel === 'search' ? <SearchPanel snapshot={snapshot} activePageId={isNewTab(activePageId) ? null : activePageId} mode={searchMode} query={searchQuery} focusToken={searchFocusToken} onModeChange={(mode) => { setSearchMode(mode); setSearchQuery(''); setSearchFocusToken((value) => value + 1); }} onQueryChange={setSearchQuery} onOpen={openSearchHit} onClose={() => setActivePanel('explorer')} /> : activePanel === 'extensions' ? <ExtensionsPanel extensions={extensions} onToggle={toggleExtension} onSearch={searchMarketplace} onInstall={installMarketplace} onSetting={async (id, key, value) => { try { await window.whiteboard.setExtensionSetting(id, key, value); await refreshExtensions(); } catch (error) { notifyError(error); } }} /> : <SettingsPanel theme={theme} onThemeChange={(value) => { setTheme(value); setUiColor(''); }} accentColor={accentColor} onAccentChange={setAccentColor} uiColor={uiColor} onUiColorChange={setUiColor} pageColor={paperColor} onPageColorChange={(value) => void changePaperColor(value)} keybindings={keybindings} onBindingChange={(command, shortcut) => setKeybindings((before) => ({ ...before, [command]: shortcut }))} onResetBindings={() => { setKeybindings({ ...DEFAULT_BINDINGS }); setMousePanButton('middle'); }} mousePanButton={mousePanButton} onMousePanButtonChange={setMousePanButton} updateStatus={updateStatus} onCheckUpdates={checkUpdates} directory={snapshot.directory} onOpenWorkspace={() => window.whiteboard.openWorkspaceFolder().catch(notifyError)} />}
         <div className="sidebar-width-resizer" role="separator" aria-label="Resize sidebar" aria-orientation="vertical" aria-valuemin={190} aria-valuemax={380} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={resizeSidebar} onKeyDown={(event) => { if (event.key === 'ArrowLeft') setSidebarWidth((size) => Math.max(190, size - 10)); if (event.key === 'ArrowRight') setSidebarWidth((size) => Math.min(380, size + 10)); }} />
       </aside>}
       <main className="editor-area" style={{ '--split-percent': `${splitRatio}%` } as React.CSSProperties} onDragOverCapture={(event) => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setFileDropPane((event.target as HTMLElement).closest('.canvas-viewport') ? null : paneAtDrop(event)); }} onDragLeave={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX <= bounds.left || event.clientX >= bounds.right || event.clientY <= bounds.top || event.clientY >= bounds.bottom) setFileDropPane(null); }} onDropCapture={(event) => { if (!event.dataTransfer.files.length) return; setFileDropPane(null); if ((event.target as HTMLElement).closest('.canvas-viewport')) return; event.preventDefault(); event.stopPropagation(); void openDroppedFiles(Array.from(event.dataTransfer.files), paneAtDrop(event)).catch(notifyError); }}>
@@ -749,7 +771,7 @@ function ExtensionsPanel({ extensions, onToggle, onSetting, onSearch, onInstall 
   </div>;
 }
 
-function SettingsPanel({ theme, onThemeChange, accentColor, onAccentChange, uiColor, onUiColorChange, pageColor, pageColorEnabled, onPageColorChange, keybindings, onBindingChange, onResetBindings, updateStatus, onCheckUpdates, directory, onOpenWorkspace }: { theme: ThemeId; onThemeChange(value: ThemeId): void; accentColor: string; onAccentChange(value: string): void; uiColor: string; onUiColorChange(value: string): void; pageColor: string; pageColorEnabled: boolean; onPageColorChange(value: string): void; keybindings: typeof DEFAULT_BINDINGS; onBindingChange(command: KeybindingCommand, shortcut: string): void; onResetBindings(): void; updateStatus: UpdateStatus; onCheckUpdates(): void; directory: string; onOpenWorkspace(): void }) {
+function SettingsPanel({ theme, onThemeChange, accentColor, onAccentChange, uiColor, onUiColorChange, pageColor, onPageColorChange, keybindings, onBindingChange, onResetBindings, mousePanButton, onMousePanButtonChange, updateStatus, onCheckUpdates, directory, onOpenWorkspace }: { theme: ThemeId; onThemeChange(value: ThemeId): void; accentColor: string; onAccentChange(value: string): void; uiColor: string; onUiColorChange(value: string): void; pageColor: string; onPageColorChange(value: string): void; keybindings: typeof DEFAULT_BINDINGS; onBindingChange(command: KeybindingCommand, shortcut: string): void; onResetBindings(): void; mousePanButton: MousePanButton; onMousePanButtonChange(value: MousePanButton): void; updateStatus: UpdateStatus; onCheckUpdates(): void; directory: string; onOpenWorkspace(): void }) {
   return <div className="settings-panel">
     <div className="sidebar-title"><span>SETTINGS</span></div>
     <div className="settings-scroll">
@@ -773,9 +795,9 @@ function SettingsPanel({ theme, onThemeChange, accentColor, onAccentChange, uiCo
       {uiColor && <button type="button" className="settings-reset-color" onClick={() => onUiColorChange('')}>Use theme workspace</button>}
       <label className="settings-color-row">Accent color <input type="color" aria-label="Accent color" value={accentColor || themeAccent[theme]} onChange={(event) => onAccentChange(event.target.value)} /></label>
       {accentColor && <button type="button" className="settings-reset-color" onClick={() => onAccentChange('')}>Use theme accent</button>}
-      <label className="settings-color-row">Page color <input type="color" aria-label="Page color" value={pageColor} disabled={!pageColorEnabled} onChange={(event) => onPageColorChange(event.target.value)} /></label>
-      {pageColorEnabled && <div className="settings-page-swatches" aria-label="Page color presets">{paperColors.map((choice) => <button key={choice} type="button" aria-label={`Page color ${choice}`} aria-pressed={pageColor === choice} title={choice} style={{ backgroundColor: choice }} onClick={() => onPageColorChange(choice)} />)}</div>}
-      <KeybindingsSection bindings={keybindings} onChange={onBindingChange} onReset={onResetBindings} />
+      <label className="settings-color-row">Page color <input type="color" aria-label="Page color" value={pageColor} onChange={(event) => onPageColorChange(event.target.value)} /></label>
+      <div className="settings-page-swatches" aria-label="Page color presets">{paperColors.map((choice) => <button key={choice} type="button" aria-label={`Page color ${choice}`} aria-pressed={pageColor === choice} title={choice} style={{ backgroundColor: choice }} onClick={() => onPageColorChange(choice)} />)}</div>
+      <KeybindingsSection bindings={keybindings} onChange={onBindingChange} onReset={onResetBindings} mousePanButton={mousePanButton} onMousePanButtonChange={onMousePanButtonChange} />
       <div className="settings-section-heading settings-files-heading">Local files</div>
       <p className="settings-hint settings-workspace-path" title={directory}>{directory}</p>
       <button className="settings-check-update" onClick={onOpenWorkspace}>Open workspace folder</button>

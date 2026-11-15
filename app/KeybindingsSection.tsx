@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { bindingConflict, eventToShortcut, keybindingCommands, shortcutLabel, type KeybindingCommand, type Keybindings } from './keybindings';
+import type { MousePanButton } from './mouseControls';
 
-export default function KeybindingsSection({ bindings, onChange, onReset }: { bindings: Keybindings; onChange(command: KeybindingCommand, shortcut: string): void; onReset(): void }) {
+export default function KeybindingsSection({ bindings, onChange, onReset, mousePanButton, onMousePanButtonChange }: { bindings: Keybindings; onChange(command: KeybindingCommand, shortcut: string): void; onReset(): void; mousePanButton: MousePanButton; onMousePanButtonChange(value: MousePanButton): void }) {
   const [recording, setRecording] = useState<KeybindingCommand | null>(null);
   const [error, setError] = useState('');
   return <details className="settings-keybindings"><summary>Keyboard shortcuts</summary><div className="settings-keybinding-content">
@@ -21,6 +22,8 @@ export default function KeybindingsSection({ bindings, onChange, onReset }: { bi
       }}>{recording === command.id ? 'Press keys…' : shortcutLabel(bindings[command.id])}</button></div>
     </div>)}
     {error && <p className="keybinding-error" role="alert">{error}</p>}
+    <div className="keybinding-group">Mouse</div>
+    <label className="keybinding-row"><span>Pan with</span><select value={mousePanButton} onChange={(event) => onMousePanButtonChange(event.target.value as MousePanButton)}><option value="middle">Middle drag</option><option value="right">Right drag</option><option value="none">Space + drag only</option></select></label>
     <div className="keybinding-footer"><span>Escape cancels · Backspace clears</span><button onClick={() => { onReset(); setRecording(null); setError(''); }}>Restore defaults</button></div>
   </div></details>;
 }

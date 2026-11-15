@@ -75,15 +75,12 @@ fn notebooks_folders_and_pages_have_visible_paths_and_stable_ids() {
 }
 
 #[test]
-fn hierarchy_rejects_collisions_bad_names_and_page_parents() {
+fn hierarchy_numbers_collisions_and_rejects_bad_names_and_page_parents() {
     let temp = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let root = temp.path().join("Workspace");
     let mut workspace = Workspace::create(&root).unwrap();
     let notebook = workspace.create_notebook("Research").unwrap();
-    assert!(matches!(
-        workspace.create_notebook("research"),
-        Err(WorkspaceError::NameConflict)
-    ));
+    assert_eq!(workspace.create_notebook("research").unwrap().title, "research(1)");
     assert!(matches!(
         workspace.create_folder(notebook.id, "../escape"),
         Err(WorkspaceError::InvalidName)
@@ -106,15 +103,38 @@ fn names_are_normalized_for_portable_case_insensitive_folders() {
     let mut workspace = Workspace::create(&temp.path().join("Workspace")).unwrap();
     let notebook = workspace.create_notebook("Research").unwrap();
     workspace.create_folder(notebook.id, "Straße").unwrap();
-    assert!(matches!(
-        workspace.create_folder(notebook.id, "STRASSE"),
-        Err(WorkspaceError::NameConflict)
-    ));
+    assert_eq!(workspace.create_folder(notebook.id, "STRASSE").unwrap().title, "STRASSE(1)");
     workspace.create_folder(notebook.id, "Résumé").unwrap();
-    assert!(matches!(
-        workspace.create_folder(notebook.id, "Re\u{301}sume\u{301}"),
-        Err(WorkspaceError::NameConflict)
-    ));
+    assert_eq!(workspace.create_folder(notebook.id, "Re\u{301}sume\u{301}").unwrap().title, "Résumé(1)");
+}
+
+#[test]
+fn new_siblings_use_the_next_available_number_without_changing_the_requested_base() {
+    let temp = tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = temp.path().join("Workspace");
+    let mut workspace = Workspace::create(&root).unwrap();
+    let notebook = workspace.create_notebook("Class").unwrap();
+    let folder = workspace.create_folder(notebook.id, "file").unwrap();
+    assert_eq!(workspace.create_folder(notebook.id, "file").unwrap().title, "file(1)");
+    assert_eq!(workspace.create_folder(notebook.id, "file").unwrap().title, "file(2)");
+    assert_eq!(workspace.create_folder(notebook.id, "file(1)").unwrap().title, "file(1)(1)");
+    assert_eq!(workspace.create_folder(folder.id, "file").unwrap().title, "file");
+    let first = workspace.create_page(notebook.id, "Note").unwrap();
+    assert_eq!(workspace.create_page(notebook.id, "Note").unwrap().title, "Note(1)");
+    assert!(root.join(first.relative_path).is_file());
+    assert!(root.join("Class/Note(1).page").is_file());
+    fs::write(root.join("Class/Loose.page"), "occupied").unwrap();
+    assert_eq!(workspace.create_page(notebook.id, "Loose").unwrap().title, "Loose(1)");
+    let long_name = "x".repeat(120);
+    workspace.create_folder(notebook.id, &long_name).unwrap();
+    let numbered = workspace.create_folder(notebook.id, &long_name).unwrap();
+    assert_eq!(numbered.title.chars().count(), 120);
+    assert!(numbered.title.ends_with("(1)"));
+    let first_asset = workspace.import_asset("Slides.pdf", "application/pdf", b"first").unwrap();
+    let second_asset = workspace.import_asset("Slides.pdf", "application/pdf", b"second").unwrap();
+    assert_eq!(workspace.create_document_page(notebook.id, first_asset.id).unwrap().title, "Slides.pdf");
+    assert_eq!(workspace.create_document_page(notebook.id, second_asset.id).unwrap().title, "Slides(1).pdf");
+    assert!(root.join("Class/Slides(1).pdf").is_file());
 }
 
 #[test]

@@ -11,7 +11,7 @@
     "build:tauri": "tsc -p tsconfig.app.json --noEmit && vite build --config vite.tauri.config.mts && node scripts/tauri-html.cjs",
     "start": "npm --prefix tauri-v2 run tauri -- dev",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "test": "node scripts/document-fixtures.cjs && node scripts/build-marketplace-example.cjs && node scripts/test-marketplace-catalog.cjs && node scripts/test-distribution.cjs && node scripts/test-download-page.cjs && node scripts/test-resize.cjs && tsc app/pdfVisibility.ts app/pageColor.ts app/keybindings.ts app/workspaceSearch.ts --target ES2022 --module CommonJS --outDir .tools/test-build --skipLibCheck && node scripts/test-pdf-visibility.cjs && node scripts/test-page-color.cjs && node scripts/test-keybindings.cjs && node scripts/test-workspace-search.cjs",
+    "test": "node scripts/document-fixtures.cjs && node scripts/build-marketplace-example.cjs && node scripts/test-marketplace-catalog.cjs && node scripts/test-distribution.cjs && node scripts/test-download-page.cjs && node scripts/test-resize.cjs && tsc app/pdfVisibility.ts app/pageColor.ts app/keybindings.ts app/workspaceSearch.ts app/mouseControls.ts --target ES2022 --module CommonJS --outDir .tools/test-build --skipLibCheck && node scripts/test-pdf-visibility.cjs && node scripts/test-page-color.cjs && node scripts/test-keybindings.cjs && node scripts/test-workspace-search.cjs && node scripts/test-mouse-controls.cjs",
     "marketplace:example": "node scripts/build-marketplace-example.cjs",
     "dist:win": "npm --prefix tauri-v2 run tauri -- build --bundles nsis"
   },

@@ -15,14 +15,15 @@ import FullscreenControl, { type FullscreenScope } from './FullscreenControl';
 import { documentViewer, previewFormats } from './documentViewers';
 import { resizeObject, type ResizeEdge } from './resize';
 import { darkPaper, paperLines, readableInk } from './pageColor';
+import { isMousePanPress, type MousePanButton } from './mouseControls';
 
 const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; focusObject(id: string): boolean; flushPendingSave(): Promise<void> }
-interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onCameraChange(pageId: string, camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; focusObject(id: string): boolean; copySelection(): boolean; pasteClipboard(): Promise<void>; flushPendingSave(): Promise<void> }
+interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; mousePanButton: MousePanButton; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onCameraChange(pageId: string, camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
-type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; targetId?: string; resizeEdge?: ResizeEdge; points?: InkPoint[]; lasso?: Point[] };
+type Gesture = { kind: 'pan' | 'draw' | 'erase' | 'lasso' | 'move' | 'resize'; pointerId: number; start: Point; camera: Camera; objects: CanvasObject[]; selected: string[]; mouseButton?: number; targetId?: string; resizeEdge?: ResizeEdge; points?: InkPoint[]; lasso?: Point[] };
 const emptyDoc = (text = '') => ({ type: 'doc', content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : [] }] });
 const clone = (objects: CanvasObject[]) => objects.map((object) => ({ ...object, payload: structuredClone(object.payload) }));
 const clamp = (number: number, min: number, max: number) => Math.max(min, Math.min(max, number));
@@ -57,7 +58,7 @@ function plainTextOf(node: unknown): string {
 let canvasClipboard: CanvasObject[] = [];
 let canvasClipboardText = '';
 
-const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, splitView, onToggleFocus, onObjectsChange, onCameraChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
+const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, initialObjects, assets, nodes, extensions, tool, mousePanButton, onToolChange, toolbarActions, toolbarPortalTarget, showToolbar = true, focusMode, splitView, onToggleFocus, onObjectsChange, onCameraChange, onNavigatePage, onError, onAssetImported, onRunExtension, onRequestLink }, ref) {
   const viewport = useRef<HTMLDivElement>(null);
   const [objects, setObjects] = useState<CanvasObject[]>(initialObjects);
   const [camera, setCamera] = useState<Camera>({ x: row.camera_x, y: row.camera_y, zoom: row.camera_zoom });
@@ -94,6 +95,8 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
   const [viewportSize, setViewportSize] = useState({ width: 1000, height: 650 });
   const [localAssets, setLocalAssets] = useState(assets);
   const gesture = useRef<Gesture | null>(null);
+  const rightPanMoved = useRef(false);
+  const rightClickHandled = useRef(false);
   const pinch = useRef<{ distance: number; center: Point; camera: Camera } | null>(null);
   const touches = useRef(new Map<number, Point>());
   const history = useRef<{ past: CanvasObject[][]; future: CanvasObject[][] }>({ past: [], future: [] });
@@ -276,7 +279,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'extension', x: center.x - 180, y: center.y - 120, width: 360, height: 240, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { extensionId, objectType, data } };
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
   }
-  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject, focusObject: (id) => {
+  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject, copySelection: () => { if (!selectedRef.current.length) return false; copySelected(); return true; }, pasteClipboard: async () => { const element = viewport.current; await pasteFromMenu({ x: (element?.clientWidth ?? 0) / 2, y: (element?.clientHeight ?? 0) / 2 }); }, focusObject: (id) => {
     const object = objectsRef.current.find((item) => item.id === id);
     const element = viewport.current;
     if (!object || !element) return false;
@@ -324,11 +327,12 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       }
     }
     if (gesture.current || pinch.current) return;
-    if (event.pointerType === 'mouse' && event.button !== 0 && event.button !== 1) return;
+    const mousePan = isMousePanPress(event.nativeEvent, mousePanButton);
+    if (event.pointerType === 'mouse' && event.button !== 0 && !mousePan) return;
     const point = screen(event.nativeEvent);
     const position = world(point);
     const eraserButton = event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0);
-    const currentTool = spaceHeld.current || event.button === 1 ? 'hand' : eraserButton ? 'eraser' : toolRef.current;
+    const currentTool = spaceHeld.current || mousePan ? 'hand' : eraserButton ? 'eraser' : toolRef.current;
     if (currentTool === 'text') {
       if ((event.target as HTMLElement).closest('.canvas-object')) return;
       createText(position.x, position.y); return;
@@ -338,7 +342,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     viewport.current?.setPointerCapture(event.pointerId);
     const kind: Gesture['kind'] = currentTool === 'hand' ? 'pan' : currentTool === 'eraser' ? 'erase' : currentTool === 'lasso' ? 'lasso' : 'draw';
     const initialPoint = sample(event.nativeEvent);
-    gesture.current = { kind, pointerId: event.pointerId, start: kind === 'pan' ? point : position, camera: cameraRef.current, objects: objectsRef.current, selected: selectedRef.current, points: [initialPoint], lasso: [position] };
+    gesture.current = { kind, pointerId: event.pointerId, start: kind === 'pan' ? point : position, camera: cameraRef.current, objects: objectsRef.current, selected: selectedRef.current, mouseButton: mousePan ? event.button : undefined, points: [initialPoint], lasso: [position] };
     if (kind === 'draw') setInk({ points: [initialPoint], highlighter: currentTool === 'highlighter' });
     if (kind === 'lasso') setLasso([position]);
     if (kind === 'erase') updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser));
@@ -361,7 +365,11 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (!current || event.pointerId !== current.pointerId) return;
     const point = screen(event.nativeEvent);
     const position = world(point);
-    if (current.kind === 'pan') { updateCamera({ ...current.camera, x: current.camera.x + point.x - current.start.x, y: current.camera.y + point.y - current.start.y }); return; }
+    if (current.kind === 'pan') {
+      if (current.mouseButton === 2 && Math.hypot(point.x - current.start.x, point.y - current.start.y) > 4) { rightPanMoved.current = true; setContextMenu(null); }
+      updateCamera({ ...current.camera, x: current.camera.x + point.x - current.start.x, y: current.camera.y + point.y - current.start.y });
+      return;
+    }
     if (current.kind === 'move') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => current.selected.includes(object.id) ? { ...object, x: object.x + dx, y: object.y + dy } : object)); return; }
     if (current.kind === 'resize') { const dx = position.x - current.start.x; const dy = position.y - current.start.y; updateObjects(current.objects.map((object) => object.id === current.targetId ? resizeObject(object, current.resizeEdge ?? 'se', dx, dy) : object)); return; }
     if (current.kind === 'erase') { updateObjects(eraseInk(objectsRef.current, position.x, position.y, 12 / cameraRef.current.zoom, partialEraser)); return; }
@@ -378,6 +386,10 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     if (event.pointerType === 'touch') { touches.current.delete(event.pointerId); if (touches.current.size < 2) pinch.current = null; }
     const current = gesture.current;
     if (!current || event.pointerId !== current.pointerId) return;
+    if (current.mouseButton === 2 && !rightPanMoved.current) {
+      rightClickHandled.current = true;
+      showCanvasMenu(screen(event.nativeEvent), event.target as HTMLElement);
+    }
     if (current.kind === 'draw' && current.points?.length) {
       const points = current.points;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -446,6 +458,21 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     }
   }
 
+  function showCanvasMenu(point: Point, target: HTMLElement) {
+    const position = world(point);
+    const objectId = target.closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null;
+    const object = objectsRef.current.find((item) => item.id === objectId) ?? [...objectsRef.current].sort((a, b) => b.z_index - a.z_index).find((item) => position.x >= item.x && position.x <= item.x + item.width && position.y >= item.y && position.y <= item.y + item.height);
+    if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]);
+    setContextMenu({ point, objectId: object?.id ?? null });
+    setAttachmentMenuId(null);
+  }
+
+  function onViewportContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if ((event.target as HTMLElement).closest('.canvas-context-menu') || mousePanButton === 'right' && event.button === 2 && (gesture.current?.mouseButton === 2 || rightPanMoved.current || rightClickHandled.current)) return;
+    showCanvasMenu(screen(event.nativeEvent), event.target as HTMLElement);
+  }
+
   function groupSelected() { if (selectedRef.current.length < 2) return; const groupId = crypto.randomUUID(); commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, group_id: groupId } : object)); }
   function ungroupSelected() { commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, group_id: null } : object)); }
   function zOrder(front: boolean) { const top = Math.max(0, ...objectsRef.current.map((item) => item.z_index)); const bottom = Math.min(0, ...objectsRef.current.map((item) => item.z_index)); commit(objectsRef.current.map((object) => selectedRef.current.includes(object.id) ? { ...object, z_index: front ? top + 1 : bottom - 1 } : object)); }
@@ -510,7 +537,6 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
       const key = event.key.toLowerCase();
       if (command && key === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); }
       else if (command && key === 'y') { event.preventDefault(); redo(); }
-      else if (command && key === 'c' && selectedRef.current.length) { event.preventDefault(); copySelected(); }
       else if (command && key === 'x' && selectedRef.current.length) { event.preventDefault(); cutSelected(); }
       else if (command && key === 'g') { event.preventDefault(); event.shiftKey ? ungroupSelected() : groupSelected(); }
       else if (key === 'delete' || key === 'backspace') { if (selectedRef.current.length) { event.preventDefault(); deleteSelected(); } }
@@ -575,7 +601,7 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     {focusMode && showToolbar && <div className="focus-controls"><button aria-expanded={focusToolsOpen} onClick={() => setFocusToolsOpen((open) => !open)}>Tools <ChevronDown size={14} /></button></div>}
     {toolbar && (toolbarPortalTarget && !focusMode ? createPortal(toolbar, toolbarPortalTarget) : toolbar)}
     {selectedObject?.type === 'text' && formatOpen && (!focusMode || focusToolsOpen) && <RichToolbar selectedObject={selectedObject} fontSize={selectedFontSize?.id === selectedObject.id ? selectedFontSize.size : ''} fontColor={selectedFontColor?.id === selectedObject.id ? selectedFontColor.color : '#263550'} onAction={(action) => { if (selectedObject?.type === 'text') document.dispatchEvent(new CustomEvent('whiteboard:text-command', { detail: { id: selectedObject.id, action } })); }} onRequestLink={onRequestLink} appearance={textAppearance(selectedObject)} onAppearance={(appearance) => setAppearance(selectedObject.id, appearance)} />}
-    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} data-dark-paper={darkPaper(row.paper_color)} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={(event) => { event.preventDefault(); if ((event.target as HTMLElement).closest('.canvas-context-menu')) return; const point = screen(event.nativeEvent); const position = world(point); const objectId = (event.target as HTMLElement).closest<HTMLElement>('.canvas-object')?.dataset.objectId ?? null; const object = objectsRef.current.find((item) => item.id === objectId) ?? [...objectsRef.current].sort((a, b) => b.z_index - a.z_index).find((item) => position.x >= item.x && position.x <= item.x + item.width && position.y >= item.y && position.y <= item.y + item.height); if (object && !selectedRef.current.includes(object.id)) updateSelected(object.group_id ? objectsRef.current.filter((item) => item.group_id === object.group_id).map((item) => item.id) : [object.id]); setContextMenu({ point, objectId: object?.id ?? null }); setAttachmentMenuId(null); }} style={{ '--ui-paper': row.paper_color, '--ui-paper-line': paperLines(row.paper_color), '--paper-foreground': darkPaper(row.paper_color) ? '#ffffff' : '#182334' } as React.CSSProperties}>
+    <div ref={viewport} className="canvas-viewport" data-tool={tool} data-paper={row.paper_style} data-dark-paper={darkPaper(row.paper_color)} onPointerDownCapture={(event) => { if (event.pointerType === 'mouse' && event.button === 2) { rightPanMoved.current = false; rightClickHandled.current = false; } }} onPointerDown={(event) => { if (contextMenu) setContextMenu(null); onPointerDown(event); }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel} onLostPointerCapture={onPointerCancel} onWheel={onWheel} onDragOver={(event) => event.preventDefault()} onDrop={onDrop} onContextMenu={onViewportContextMenu} style={{ '--ui-paper': row.paper_color, '--ui-paper-line': paperLines(row.paper_color), '--paper-foreground': darkPaper(row.paper_color) ? '#ffffff' : '#182334' } as React.CSSProperties}>
       {row.paper_style !== 'blank' && <div className={`paper-pattern paper-${row.paper_style}`} aria-hidden="true" style={{ backgroundSize: row.paper_style === 'lines' ? `100% ${32 * camera.zoom}px` : `${24 * camera.zoom}px ${24 * camera.zoom}px`, transform: `translate(${row.paper_style === 'lines' ? 0 : camera.x % (24 * camera.zoom)}px, ${camera.y % ((row.paper_style === 'lines' ? 32 : 24) * camera.zoom)}px)` }} />}
       <div className="canvas-world" style={worldStyle}>
         {visibleObjects.map((object) => <div key={object.id} className={`canvas-object object-${object.type} ${selected.includes(object.id) ? 'selected' : ''} ${activeDoc === object.id ? 'doc-active' : ''} ${object.type === 'text' && textAppearance(object).color && textAppearance(object).opacity > 0 ? 'boxed-note' : ''} ${object.type === 'document' && (object.payload as { presentation?: string }).presentation === 'printout' ? `printout printout-${(object.payload as { format: string }).format}` : ''} ${fileNeedsTile(object, extensions) ? 'file-tile-object' : ''}`} data-object-id={object.id} style={{ left: object.x, top: object.y, width: object.width, height: object.height, zIndex: attachmentMenuId === object.id ? 2147483646 : object.z_index, ...(object.type === 'text' ? { backgroundColor: paperColor(textAppearance(object)) } : {}) }} onPointerDown={(event) => { if (tool === 'select' && object.type !== 'text') startObjectGesture(event, object, 'move'); }}>

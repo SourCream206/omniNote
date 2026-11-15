@@ -393,6 +393,7 @@ body { color:var(--ui-text); background:var(--ui-bg); }
 .keybinding-row>span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .keybinding-row button { flex:0 0 auto; max-width:135px; padding:4px 6px; border:1px solid var(--ui-line); border-radius:4px; background:var(--ui-surface); color:var(--ui-text); font-size:10px; }
 .keybinding-row button[aria-pressed=true] { border-color:var(--ui-accent); color:var(--ui-accent); }
+.keybinding-row select { max-width:145px; padding:4px 5px; border:1px solid var(--ui-line); border-radius:4px; background:var(--ui-surface); color:var(--ui-text); font-size:10px; }
 .keybinding-error { margin:8px 0; color:#b43737; font-size:10px; }
 .keybinding-footer { display:flex; flex-direction:column; align-items:flex-start; gap:5px; margin-top:13px; color:var(--ui-muted); font-size:10px; }
 .keybinding-footer button { padding:3px 0; border:0; background:transparent; color:var(--ui-accent); font-size:10px; }
