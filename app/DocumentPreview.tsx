@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { renderAsync } from 'docx-preview';
 import DOMPurify from 'dompurify';
-import JSZip from 'jszip';
-import { marked } from 'marked';
 import { LoaderCircle } from 'lucide-react';
 import type { Asset, CanvasObject, ExtensionInfo } from './types';
 import ExtensionFrame from './ExtensionFrame';
@@ -82,7 +79,7 @@ export default function DocumentPreview({ object, asset, viewer, interactive, fu
         else if (format === 'pptx') content = await renderPptx(bytes);
         else if (['txt','md','markdown','html','htm'].includes(format)) {
           const source = new TextDecoder().decode(bytes);
-          content = format === 'txt' ? htmlDocument(`<pre>${escapeHtml(source)}</pre>`) : format === 'md' || format === 'markdown' ? htmlDocument(DOMPurify.sanitize(await marked.parse(source))) : htmlDocument(DOMPurify.sanitize(source));
+          content = format === 'txt' ? htmlDocument(`<pre>${escapeHtml(source)}</pre>`) : format === 'md' || format === 'markdown' ? htmlDocument(DOMPurify.sanitize(await (await import('marked')).marked.parse(source))) : htmlDocument(DOMPurify.sanitize(source));
         } else content = htmlDocument('<p>No in-canvas viewer is installed for this file type. Use <strong>Open original</strong>.</p>');
         if (live) setHtml(content);
       } catch (reason) { if (live) setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -144,6 +141,7 @@ function LazyPdfPage({ pageNumber, width, visible, onSizeChange }: { pageNumber:
 }
 
 async function renderDocx(bytes: Uint8Array, printout = false, fullDocument = false) {
+  const { renderAsync } = await import('docx-preview');
   const body = document.createElement('div');
   const styles = document.createElement('div');
   await renderAsync(new Blob([new Uint8Array(bytes)]), body, styles, { breakPages: true, useBase64URL: true });
@@ -179,6 +177,7 @@ async function renderXlsx(bytes: Uint8Array) {
 }
 
 async function renderPptx(bytes: Uint8Array) {
+  const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(bytes);
   const slides = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]));
   const html: string[] = [];
