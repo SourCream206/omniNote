@@ -1,0 +1,20 @@
+const assert = require('node:assert/strict');
+const { DEFAULT_BINDINGS, commandForEvent, eventToShortcut, isTypingTarget, readKeybindings, bindingConflict } = require('../.tools/test-build/keybindings.js');
+
+const key = (name, options = {}) => ({ key: name, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...options });
+assert.equal(eventToShortcut(key('f', { ctrlKey: true, shiftKey: true })), 'Mod+Shift+F');
+assert.equal(commandForEvent(key('t', { ctrlKey: true }), DEFAULT_BINDINGS), 'tab.open');
+assert.equal(commandForEvent(key('f', { ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS), 'search.notebook');
+assert.equal(commandForEvent(key('p'), DEFAULT_BINDINGS), 'tool.pen');
+assert.equal(commandForEvent(key('P', { shiftKey: true }), DEFAULT_BINDINGS), null);
+assert.equal(bindingConflict(DEFAULT_BINDINGS, 'tool.pen', 'T'), 'tool.text');
+assert.equal(bindingConflict(DEFAULT_BINDINGS, 'tool.pen', 'Mod+Z'), 'reserved');
+assert.equal(bindingConflict(DEFAULT_BINDINGS, 'tool.pen', 'Alt+P'), null);
+assert.equal(isTypingTarget({ isContentEditable: true }), true);
+assert.equal(isTypingTarget({ closest: (selector) => selector.includes('textarea') ? {} : null }), true);
+assert.equal(isTypingTarget({ closest: () => null }), false);
+const brokenStorage = { getItem: () => '{not json' };
+assert.deepEqual(readKeybindings(brokenStorage), DEFAULT_BINDINGS);
+const customStorage = { getItem: () => JSON.stringify({ 'tool.pen': 'Alt+P', 'tab.open': 'Mod+T', 'tool.text': 'Alt+P' }) };
+assert.equal(readKeybindings(customStorage)['tool.pen'], 'Alt+P');
+assert.equal(readKeybindings(customStorage)['tool.text'], DEFAULT_BINDINGS['tool.text']);

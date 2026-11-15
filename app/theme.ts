@@ -1,8 +1,8 @@
 export const themes = [
-  { id: 'classic', name: 'Classic Light', description: 'Clean blue and white' },
-  { id: 'midnight', name: 'Midnight', description: 'Dark workspace, bright paper' },
-  { id: 'warm', name: 'Warm Paper', description: 'Soft cream and bronze' },
-  { id: 'sage', name: 'Sage', description: 'Quiet green accents' },
+  { id: 'classic', name: 'Classic Light' },
+  { id: 'midnight', name: 'Midnight' },
+  { id: 'warm', name: 'Warm Paper' },
+  { id: 'sage', name: 'Sage' },
 ] as const;
 
 export type ThemeId = (typeof themes)[number]['id'];

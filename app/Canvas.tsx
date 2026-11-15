@@ -18,7 +18,7 @@ import { darkPaper, paperLines, readableInk } from './pageColor';
 
 const DocumentPreview = lazy(() => import('./DocumentPreview'));
 
-export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; flushPendingSave(): Promise<void> }
+export interface CanvasHandle { insertText(text: string): void; insertAsset(asset: Asset, presentation?: 'block' | 'printout', at?: { x: number; y: number }): Promise<void>; insertExtensionObject(extensionId: string, objectType: string, data: unknown): void; focusObject(id: string): boolean; flushPendingSave(): Promise<void> }
 interface Props { page: TreeNode; row: PageRow; initialObjects: CanvasObject[]; assets: Asset[]; nodes: TreeNode[]; extensions: ExtensionInfo[]; tool: CanvasTool; onToolChange(tool: CanvasTool): void; toolbarActions?: React.ReactNode; toolbarPortalTarget?: HTMLElement | null; showToolbar?: boolean; focusMode: boolean; splitView: boolean; onToggleFocus(scope?: FullscreenScope): void; onObjectsChange(pageId: string, objects: CanvasObject[], camera: Camera): void; onCameraChange(pageId: string, camera: Camera): void; onNavigatePage(id: string): void; onError(error: unknown): void; onAssetImported(asset: Asset): Promise<void>; onRunExtension(command: string): void; onRequestLink(): Promise<string | null> }
 type Point = { x: number; y: number };
 type CanvasContextMenu = { point: Point; objectId: string | null };
@@ -276,7 +276,17 @@ const Canvas = forwardRef<CanvasHandle, Props>(function Canvas({ page, row, init
     const object: CanvasObject = { id: crypto.randomUUID(), page_id: page.id, type: 'extension', x: center.x - 180, y: center.y - 120, width: 360, height: 240, z_index: Math.max(0, ...objectsRef.current.map((item) => item.z_index)) + 1, group_id: null, payload_version: 1, payload: { extensionId, objectType, data } };
     commit([...objectsRef.current, object]); updateSelected([object.id]); updateTool('select');
   }
-  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject, flushPendingSave }), [page.id]);
+  useImperativeHandle(ref, () => ({ insertText: (text) => { const point = centerWorld(); createText(point.x - 150, point.y - 80, text); }, insertAsset, insertExtensionObject, focusObject: (id) => {
+    const object = objectsRef.current.find((item) => item.id === id);
+    const element = viewport.current;
+    if (!object || !element) return false;
+    const zoom = cameraRef.current.zoom;
+    const x = object.x + Math.min(object.width, element.clientWidth / zoom * 0.8) / 2;
+    const y = object.y + Math.min(object.height, element.clientHeight / zoom * 0.8) / 2;
+    updateCamera({ x: element.clientWidth / 2 - x * zoom, y: element.clientHeight / 2 - y * zoom, zoom });
+    updateSelected([id]);
+    return true;
+  }, flushPendingSave }), [page.id]);
 
   function screen(event: { clientX: number; clientY: number }): Point { const rect = viewport.current!.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top }; }
   function world(point: Point, cam = cameraRef.current): Point { return { x: (point.x - cam.x) / cam.zoom, y: (point.y - cam.y) / cam.zoom }; }
